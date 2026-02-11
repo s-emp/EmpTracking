@@ -1,4 +1,5 @@
 import Cocoa
+import ServiceManagement
 
 @main
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -19,6 +20,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupDatabase()
         setupMenubar()
         setupTracker()
+        registerAutoLaunch()
     }
 
     func applicationWillTerminate(_ aNotification: Notification) {
@@ -67,6 +69,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         tracker.start()
+    }
+
+    private func registerAutoLaunch() {
+        do {
+            try SMAppService.mainApp.register()
+        } catch {
+            print("Failed to register login item: \(error)")
+        }
     }
 
     @objc private func togglePopover() {
