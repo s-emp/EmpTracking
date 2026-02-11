@@ -8,9 +8,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var tracker: ActivityTracker!
     private var timelineVC: TimelineViewController!
 
-    func applicationDidFinishLaunching(_ aNotification: Notification) {
-        NSApp.windows.forEach { $0.close() }
+    static func main() {
+        let app = NSApplication.shared
+        let delegate = AppDelegate()
+        app.delegate = delegate
+        app.run()
+    }
 
+    func applicationDidFinishLaunching(_ aNotification: Notification) {
         setupDatabase()
         setupMenubar()
         setupTracker()
@@ -41,6 +46,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
             button.image = NSImage(systemSymbolName: "clock", accessibilityDescription: "EmpTracking")
+            button.target = self
             button.action = #selector(togglePopover)
         }
 
