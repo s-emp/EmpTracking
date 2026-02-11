@@ -62,7 +62,7 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
             sqlite3_bind_text(stmt, 1, (bundleId as NSString).utf8String, -1, nil)
             sqlite3_bind_text(stmt, 2, (appName as NSString).utf8String, -1, nil)
             if let iconData = iconPNG {
-                iconData.withUnsafeBytes { rawBuffer in
+                _ = iconData.withUnsafeBytes { rawBuffer in
                     sqlite3_bind_blob(stmt, 3, rawBuffer.baseAddress, Int32(iconData.count), nil)
                 }
             } else {
