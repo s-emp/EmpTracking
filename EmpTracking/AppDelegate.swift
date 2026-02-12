@@ -8,6 +8,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var db: DatabaseManager!
     private var tracker: ActivityTracker!
     private var timelineVC: TimelineViewController!
+    private var detailWindow: NSWindow?
 
     static func main() {
         let app = NSApplication.shared
@@ -53,6 +54,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         timelineVC = TimelineViewController(db: db)
+        timelineVC.onDetail = { [weak self] in
+            self?.showDetailWindow()
+        }
 
         popover = NSPopover()
         popover.contentSize = NSSize(width: 400, height: 500)
@@ -86,5 +90,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             timelineVC.reload()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
+    }
+
+    private func showDetailWindow() {
+        popover.performClose(nil)
+
+        if let window = detailWindow {
+            (window.contentViewController as? DetailViewController)?.reload()
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate()
+            return
+        }
+
+        let detailVC = DetailViewController(db: db)
+        let window = NSWindow(contentViewController: detailVC)
+        window.title = "Подробнее"
+        window.setContentSize(NSSize(width: 500, height: 600))
+        window.styleMask = [.titled, .closable, .resizable, .miniaturizable]
+        window.minSize = NSSize(width: 400, height: 300)
+        window.center()
+        window.isReleasedWhenClosed = false
+        self.detailWindow = window
+
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate()
     }
 }

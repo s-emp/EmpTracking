@@ -3,6 +3,7 @@ import Cocoa
 final class TimelineViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     private let db: DatabaseManager
     private var summaries: [AppSummary] = []
+    var onDetail: (() -> Void)?
 
     private let segmentedControl = NSSegmentedControl()
     private let scrollView = NSScrollView()
@@ -55,7 +56,15 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        tableView.backgroundColor = .clear
         container.addSubview(scrollView)
+
+        let detailButton = NSButton(title: "Подробнее", target: self, action: #selector(detailTapped))
+        detailButton.translatesAutoresizingMaskIntoConstraints = false
+        detailButton.bezelStyle = .inline
+        detailButton.font = .systemFont(ofSize: 11)
+        container.addSubview(detailButton)
 
         let quitButton = NSButton(title: "Quit", target: NSApp, action: #selector(NSApplication.terminate(_:)))
         quitButton.translatesAutoresizingMaskIntoConstraints = false
@@ -79,6 +88,9 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: quitButton.topAnchor, constant: -8),
 
+            detailButton.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            detailButton.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
+
             quitButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
             quitButton.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
         ])
@@ -91,6 +103,10 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
 
     @objc private func segmentChanged(_ sender: NSSegmentedControl) {
         reload()
+    }
+
+    @objc private func detailTapped() {
+        onDetail?()
     }
 
     func reload() {
