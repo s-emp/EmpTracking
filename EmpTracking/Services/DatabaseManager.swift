@@ -158,6 +158,48 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
         return logs
     }
 
+    func fetchAppSummaries(since: Date) throws -> [AppSummary] {
+        let sql = """
+            SELECT a.id, a.app_name, a.bundle_id, a.icon,
+                   SUM(l.end_time - l.start_time) as total_duration
+            FROM activity_logs l
+            JOIN apps a ON a.id = l.app_id
+            WHERE l.start_time >= ? AND l.is_idle = 0
+            GROUP BY l.app_id
+            ORDER BY total_duration DESC
+        """
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        sqlite3_bind_double(stmt, 1, since.timeIntervalSince1970)
+
+        var summaries: [AppSummary] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let appId = sqlite3_column_int64(stmt, 0)
+            let appName = String(cString: sqlite3_column_text(stmt, 1))
+            let bundleId = String(cString: sqlite3_column_text(stmt, 2))
+
+            var icon: NSImage? = nil
+            if sqlite3_column_type(stmt, 3) != SQLITE_NULL {
+                let bytes = sqlite3_column_blob(stmt, 3)
+                let length = sqlite3_column_bytes(stmt, 3)
+                if let bytes = bytes, length > 0 {
+                    let data = Data(bytes: bytes, count: Int(length))
+                    icon = NSImage(data: data)
+                }
+            }
+
+            let totalDuration = sqlite3_column_double(stmt, 4)
+            summaries.append(AppSummary(appId: appId, appName: appName, bundleId: bundleId, icon: icon, totalDuration: totalDuration))
+        }
+
+        return summaries
+    }
+
     func fetchAppInfo(appId: Int64) throws -> AppInfo? {
         let sql = "SELECT id, bundle_id, app_name, icon FROM apps WHERE id = ?"
         var stmt: OpaquePointer?

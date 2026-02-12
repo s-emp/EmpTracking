@@ -2,9 +2,9 @@ import Cocoa
 
 final class TimelineViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     private let db: DatabaseManager
-    private var logs: [ActivityLog] = []
-    private var appCache: [Int64: AppInfo] = [:]
+    private var summaries: [AppSummary] = []
 
+    private let segmentedControl = NSSegmentedControl()
     private let scrollView = NSScrollView()
     private let tableView = NSTableView()
     private let headerLabel = NSTextField(labelWithString: "")
@@ -31,6 +31,17 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
         totalLabel.font = .systemFont(ofSize: 12)
         totalLabel.textColor = .secondaryLabelColor
         container.addSubview(totalLabel)
+
+        segmentedControl.translatesAutoresizingMaskIntoConstraints = false
+        segmentedControl.segmentCount = 3
+        segmentedControl.setLabel("День", forSegment: 0)
+        segmentedControl.setLabel("Неделя", forSegment: 1)
+        segmentedControl.setLabel("Месяц", forSegment: 2)
+        segmentedControl.selectedSegment = 0
+        segmentedControl.target = self
+        segmentedControl.action = #selector(segmentChanged(_:))
+        segmentedControl.segmentStyle = .rounded
+        container.addSubview(segmentedControl)
 
         let column = NSTableColumn(identifier: .init("activity"))
         column.title = ""
@@ -59,7 +70,11 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
             totalLabel.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
             totalLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
 
-            scrollView.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 8),
+            segmentedControl.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 8),
+            segmentedControl.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            segmentedControl.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+
+            scrollView.topAnchor.constraint(equalTo: segmentedControl.bottomAnchor, constant: 8),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: quitButton.topAnchor, constant: -8),
@@ -74,27 +89,45 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
         reload()
     }
 
+    @objc private func segmentChanged(_ sender: NSSegmentedControl) {
+        reload()
+    }
+
     func reload() {
+        let calendar = Calendar.current
+        let now = Date()
+
+        let since: Date
+        switch segmentedControl.selectedSegment {
+        case 1:
+            since = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)) ?? calendar.startOfDay(for: now)
+        case 2:
+            since = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? calendar.startOfDay(for: now)
+        default:
+            since = calendar.startOfDay(for: now)
+        }
+
         let formatter = DateFormatter()
-        formatter.dateFormat = "d MMMM yyyy"
         formatter.locale = Locale(identifier: "ru_RU")
-        headerLabel.stringValue = formatter.string(from: Date())
+        switch segmentedControl.selectedSegment {
+        case 1:
+            formatter.dateFormat = "'Неделя' d MMM"
+        case 2:
+            formatter.dateFormat = "LLLL yyyy"
+        default:
+            formatter.dateFormat = "d MMMM yyyy"
+        }
+        headerLabel.stringValue = formatter.string(from: now)
 
         do {
-            logs = try db.fetchTodayLogs()
+            summaries = try db.fetchAppSummaries(since: since)
 
-            let totalActive = logs.filter { !$0.isIdle }
-                .reduce(0.0) { $0 + $1.endTime.timeIntervalSince($1.startTime) }
+            let totalActive = summaries.reduce(0.0) { $0 + $1.totalDuration }
             let hours = Int(totalActive) / 3600
             let minutes = (Int(totalActive) % 3600) / 60
             totalLabel.stringValue = "\(hours)ч \(minutes)мин"
-
-            let appIds = Set(logs.map { $0.appId })
-            for appId in appIds where appCache[appId] == nil {
-                appCache[appId] = try db.fetchAppInfo(appId: appId)
-            }
         } catch {
-            print("Error fetching logs: \(error)")
+            print("Error fetching summaries: \(error)")
         }
 
         tableView.reloadData()
@@ -104,7 +137,7 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
 
     nonisolated func numberOfRows(in tableView: NSTableView) -> Int {
         MainActor.assumeIsolated {
-            logs.count
+            summaries.count
         }
     }
 
@@ -116,17 +149,8 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
             ?? TimelineCellView()
         cell.identifier = id
 
-        let log = logs[row]
-        let appInfo = appCache[log.appId]
-
-        cell.configure(
-            appName: appInfo?.appName ?? "Unknown",
-            windowTitle: log.windowTitle,
-            startTime: log.startTime,
-            endTime: log.endTime,
-            icon: appInfo?.icon,
-            isIdle: log.isIdle
-        )
+        let summary = summaries[row]
+        cell.configure(summary: summary)
 
         return cell
     }
