@@ -1,6 +1,7 @@
 import Cocoa
 
 final class DetailCellView: NSTableCellView {
+    private let colorDot = NSView()
     private let iconView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let timeLabel = NSTextField(labelWithString: "")
@@ -16,6 +17,11 @@ final class DetailCellView: NSTableCellView {
     }
 
     private func setupViews() {
+        colorDot.translatesAutoresizingMaskIntoConstraints = false
+        colorDot.wantsLayer = true
+        colorDot.layer?.cornerRadius = 4
+        addSubview(colorDot)
+
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.imageScaling = .scaleProportionallyUpOrDown
         addSubview(iconView)
@@ -32,7 +38,12 @@ final class DetailCellView: NSTableCellView {
         addSubview(timeLabel)
 
         NSLayoutConstraint.activate([
-            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            colorDot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            colorDot.centerYAnchor.constraint(equalTo: centerYAnchor),
+            colorDot.widthAnchor.constraint(equalToConstant: 8),
+            colorDot.heightAnchor.constraint(equalToConstant: 8),
+
+            iconView.leadingAnchor.constraint(equalTo: colorDot.trailingAnchor, constant: 4),
             iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
             iconView.widthAnchor.constraint(equalToConstant: 28),
             iconView.heightAnchor.constraint(equalToConstant: 28),
@@ -47,7 +58,7 @@ final class DetailCellView: NSTableCellView {
         ])
     }
 
-    func configure(log: ActivityLog, appInfo: AppInfo?) {
+    func configure(log: ActivityLog, appInfo: AppInfo?, tag: Tag? = nil) {
         let timeFmt = DateFormatter()
         timeFmt.dateFormat = "HH:mm"
 
@@ -59,6 +70,7 @@ final class DetailCellView: NSTableCellView {
             titleLabel.textColor = .tertiaryLabelColor
             iconView.image = NSImage(systemSymbolName: "moon.zzz", accessibilityDescription: "Idle")
             iconView.contentTintColor = .tertiaryLabelColor
+            colorDot.isHidden = true
         } else {
             let appName = appInfo?.appName ?? "Unknown"
             if let windowTitle = log.windowTitle, !windowTitle.isEmpty {
@@ -69,6 +81,24 @@ final class DetailCellView: NSTableCellView {
             titleLabel.textColor = .labelColor
             iconView.image = appInfo?.icon ?? NSImage(systemSymbolName: "app", accessibilityDescription: "App")
             iconView.contentTintColor = nil
+
+            if let tag = tag {
+                colorDot.isHidden = false
+                let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                let hex = isDark ? tag.colorDark : tag.colorLight
+                colorDot.layer?.backgroundColor = NSColor(hex: hex).cgColor
+
+                // Overridden tag: show border to distinguish from app default
+                if log.tagId != nil {
+                    colorDot.layer?.borderWidth = 1.5
+                    colorDot.layer?.borderColor = NSColor.labelColor.cgColor
+                } else {
+                    colorDot.layer?.borderWidth = 0
+                }
+            } else {
+                colorDot.isHidden = true
+                colorDot.layer?.borderWidth = 0
+            }
         }
 
         let start = timeFmt.string(from: log.startTime)
