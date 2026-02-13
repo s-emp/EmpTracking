@@ -103,6 +103,10 @@ struct DatabaseManagerTests {
         try db.deleteTag(id: tag.id)
         let tags = try db.fetchAllTags()
         #expect(tags.isEmpty)
+        let appInfo = try db.fetchAppInfo(appId: appId)
+        #expect(appInfo?.defaultTagId == nil)
+        let log = try db.fetchLastLog()
+        #expect(log?.tagId == nil)
     }
 
     @Test func rejectsDuplicateTagName() throws {
