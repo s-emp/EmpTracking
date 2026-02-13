@@ -2,8 +2,12 @@ import Cocoa
 
 final class TimelineViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     private let db: DatabaseManager
-    private var summaries: [AppSummary] = []
+    private var appSummaries: [AppSummary] = []
+    private var tagSummaries: [TagSummary] = []
     var onDetail: (() -> Void)?
+
+    private enum Mode: Int { case apps = 0, tags = 1 }
+    private var mode: Mode = .apps
 
     private let segmentedControl = NSSegmentedControl()
     private let scrollView = NSScrollView()
@@ -34,10 +38,9 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
         container.addSubview(totalLabel)
 
         segmentedControl.translatesAutoresizingMaskIntoConstraints = false
-        segmentedControl.segmentCount = 3
-        segmentedControl.setLabel("День", forSegment: 0)
-        segmentedControl.setLabel("Неделя", forSegment: 1)
-        segmentedControl.setLabel("Месяц", forSegment: 2)
+        segmentedControl.segmentCount = 2
+        segmentedControl.setLabel("Приложения", forSegment: 0)
+        segmentedControl.setLabel("Теги", forSegment: 1)
         segmentedControl.selectedSegment = 0
         segmentedControl.target = self
         segmentedControl.action = #selector(segmentChanged(_:))
@@ -102,6 +105,7 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
     }
 
     @objc private func segmentChanged(_ sender: NSSegmentedControl) {
+        mode = Mode(rawValue: sender.selectedSegment) ?? .apps
         reload()
     }
 
@@ -110,38 +114,25 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
     }
 
     func reload() {
-        let calendar = Calendar.current
-        let now = Date()
-
-        let since: Date
-        switch segmentedControl.selectedSegment {
-        case 1:
-            since = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)) ?? calendar.startOfDay(for: now)
-        case 2:
-            since = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? calendar.startOfDay(for: now)
-        default:
-            since = calendar.startOfDay(for: now)
-        }
-
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "ru_RU")
-        switch segmentedControl.selectedSegment {
-        case 1:
-            formatter.dateFormat = "'Неделя' d MMM"
-        case 2:
-            formatter.dateFormat = "LLLL yyyy"
-        default:
-            formatter.dateFormat = "d MMMM yyyy"
-        }
-        headerLabel.stringValue = formatter.string(from: now)
+        formatter.dateFormat = "d MMMM yyyy"
+        headerLabel.stringValue = formatter.string(from: Date())
+
+        let since = Calendar.current.startOfDay(for: Date())
 
         do {
-            summaries = try db.fetchAppSummaries(since: since)
+            switch mode {
+            case .apps:
+                appSummaries = try db.fetchAppSummaries(since: since)
+                let total = appSummaries.reduce(0.0) { $0 + $1.totalDuration }
+                totalLabel.stringValue = formatDuration(total)
 
-            let totalActive = summaries.reduce(0.0) { $0 + $1.totalDuration }
-            let hours = Int(totalActive) / 3600
-            let minutes = (Int(totalActive) % 3600) / 60
-            totalLabel.stringValue = "\(hours)ч \(minutes)мин"
+            case .tags:
+                tagSummaries = try db.fetchTagSummaries(from: since, to: Date())
+                let total = tagSummaries.reduce(0.0) { $0 + $1.totalDuration }
+                totalLabel.stringValue = formatDuration(total)
+            }
         } catch {
             print("Error fetching summaries: \(error)")
         }
@@ -149,25 +140,164 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
         tableView.reloadData()
     }
 
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        let hours = Int(seconds) / 3600
+        let minutes = (Int(seconds) % 3600) / 60
+        return "\(hours)ч \(minutes)мин"
+    }
+
     // MARK: - NSTableViewDataSource
 
     nonisolated func numberOfRows(in tableView: NSTableView) -> Int {
         MainActor.assumeIsolated {
-            summaries.count
+            switch mode {
+            case .apps: return appSummaries.count
+            case .tags: return tagSummaries.count
+            }
         }
     }
 
     // MARK: - NSTableViewDelegate
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let id = NSUserInterfaceItemIdentifier("TimelineCell")
-        let cell = (tableView.makeView(withIdentifier: id, owner: nil) as? TimelineCellView)
-            ?? TimelineCellView()
-        cell.identifier = id
+        switch mode {
+        case .apps:
+            let id = NSUserInterfaceItemIdentifier("TimelineCell")
+            let cell = (tableView.makeView(withIdentifier: id, owner: nil) as? TimelineCellView)
+                ?? TimelineCellView()
+            cell.identifier = id
+            cell.configure(summary: appSummaries[row])
+            return cell
 
-        let summary = summaries[row]
-        cell.configure(summary: summary)
+        case .tags:
+            let id = NSUserInterfaceItemIdentifier("TagCell")
+            let cell = (tableView.makeView(withIdentifier: id, owner: nil) as? TagCellView)
+                ?? TagCellView()
+            cell.identifier = id
+            cell.configure(summary: tagSummaries[row])
+            return cell
+        }
+    }
 
-        return cell
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        guard mode == .apps else { return false }
+        let summary = appSummaries[row]
+        showTagMenu(forAppId: summary.appId, at: row)
+        return false
+    }
+
+    // MARK: - Tag Menu
+
+    private func showTagMenu(forAppId appId: Int64, at row: Int) {
+        let menu = NSMenu()
+
+        let tags: [Tag]
+        let appInfo: AppInfo?
+        do {
+            tags = try db.fetchAllTags()
+            appInfo = try db.fetchAppInfo(appId: appId)
+        } catch {
+            print("Error loading tags: \(error)")
+            return
+        }
+
+        let currentTagId = appInfo?.defaultTagId
+
+        // "No tag" item
+        let noTagItem = NSMenuItem(title: "Без тега", action: #selector(tagMenuItemClicked(_:)), keyEquivalent: "")
+        noTagItem.target = self
+        noTagItem.representedObject = ["appId": appId, "tagId": NSNull()] as NSDictionary
+        if currentTagId == nil { noTagItem.state = .on }
+        menu.addItem(noTagItem)
+
+        if !tags.isEmpty {
+            menu.addItem(.separator())
+        }
+
+        for tag in tags {
+            let item = NSMenuItem(title: tag.name, action: #selector(tagMenuItemClicked(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = ["appId": appId, "tagId": tag.id] as NSDictionary
+            if currentTagId == tag.id { item.state = .on }
+
+            let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            let color = NSColor(hex: isDark ? tag.colorDark : tag.colorLight)
+            let dot = NSAttributedString(string: "● ", attributes: [.foregroundColor: color, .font: NSFont.systemFont(ofSize: 13)])
+            let name = NSAttributedString(string: tag.name, attributes: [.font: NSFont.systemFont(ofSize: 13)])
+            let title = NSMutableAttributedString()
+            title.append(dot)
+            title.append(name)
+            item.attributedTitle = title
+
+            menu.addItem(item)
+        }
+
+        menu.addItem(.separator())
+
+        let createItem = NSMenuItem(title: "Создать тег...", action: #selector(createTagClicked(_:)), keyEquivalent: "")
+        createItem.target = self
+        menu.addItem(createItem)
+
+        let rect = tableView.rect(ofRow: row)
+        menu.popUp(positioning: nil, at: NSPoint(x: rect.midX, y: rect.midY), in: tableView)
+    }
+
+    @objc private func tagMenuItemClicked(_ sender: NSMenuItem) {
+        guard let dict = sender.representedObject as? NSDictionary,
+              let appId = dict["appId"] as? Int64 else { return }
+        let tagId = dict["tagId"] as? Int64 // NSNull becomes nil
+        do {
+            try db.setDefaultTag(appId: appId, tagId: tagId)
+            reload()
+        } catch {
+            print("Error setting tag: \(error)")
+        }
+    }
+
+    @objc private func createTagClicked(_ sender: NSMenuItem) {
+        let alert = NSAlert()
+        alert.messageText = "Создать тег"
+        alert.addButton(withTitle: "Создать")
+        alert.addButton(withTitle: "Отмена")
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 100))
+
+        let nameField = NSTextField(frame: NSRect(x: 0, y: 70, width: 300, height: 24))
+        nameField.placeholderString = "Название тега"
+        container.addSubview(nameField)
+
+        let lightLabel = NSTextField(labelWithString: "Светлая:")
+        lightLabel.frame = NSRect(x: 0, y: 35, width: 60, height: 20)
+        container.addSubview(lightLabel)
+
+        let lightColorWell = NSColorWell(frame: NSRect(x: 65, y: 30, width: 50, height: 30))
+        lightColorWell.color = .systemGreen
+        container.addSubview(lightColorWell)
+
+        let darkLabel = NSTextField(labelWithString: "Тёмная:")
+        darkLabel.frame = NSRect(x: 150, y: 35, width: 60, height: 20)
+        container.addSubview(darkLabel)
+
+        let darkColorWell = NSColorWell(frame: NSRect(x: 215, y: 30, width: 50, height: 30))
+        darkColorWell.color = .systemGreen
+        container.addSubview(darkColorWell)
+
+        alert.accessoryView = container
+
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else { return }
+
+        let name = nameField.stringValue.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+
+        do {
+            _ = try db.createTag(name: name, colorLight: lightColorWell.color.hexString, colorDark: darkColorWell.color.hexString)
+            reload()
+        } catch {
+            let errorAlert = NSAlert()
+            errorAlert.messageText = "Ошибка"
+            errorAlert.informativeText = "Тег с таким именем уже существует."
+            errorAlert.runModal()
+        }
     }
 }
