@@ -5,4 +5,5 @@ struct AppInfo {
     let bundleId: String
     let appName: String
     let icon: NSImage?
+    let defaultTagId: Int64?
 }

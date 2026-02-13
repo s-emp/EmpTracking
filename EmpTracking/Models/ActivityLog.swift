@@ -7,4 +7,5 @@ struct ActivityLog {
     let startTime: Date
     var endTime: Date
     let isIdle: Bool
+    let tagId: Int64?
 }

@@ -41,6 +41,26 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
                 is_idle INTEGER DEFAULT 0
             )
         """)
+
+        try execute("""
+            CREATE TABLE IF NOT EXISTS tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                color_light TEXT NOT NULL,
+                color_dark TEXT NOT NULL
+            )
+        """)
+
+        // Migration: add tag columns to existing tables
+        let appsColumns = try fetchColumnNames(table: "apps")
+        if !appsColumns.contains("default_tag_id") {
+            try execute("ALTER TABLE apps ADD COLUMN default_tag_id INTEGER REFERENCES tags(id)")
+        }
+
+        let logsColumns = try fetchColumnNames(table: "activity_logs")
+        if !logsColumns.contains("tag_id") {
+            try execute("ALTER TABLE activity_logs ADD COLUMN tag_id INTEGER REFERENCES tags(id)")
+        }
     }
 
     func insertOrGetApp(bundleId: String, appName: String, iconPNG: Data?) throws -> Int64 {
@@ -121,7 +141,7 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
     }
 
     func fetchLastLog() throws -> ActivityLog? {
-        let sql = "SELECT id, app_id, window_title, start_time, end_time, is_idle FROM activity_logs ORDER BY id DESC LIMIT 1"
+        let sql = "SELECT id, app_id, window_title, start_time, end_time, is_idle, tag_id FROM activity_logs ORDER BY id DESC LIMIT 1"
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
 
@@ -140,7 +160,7 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
         let calendar = Calendar.current
         let startOfDay = calendar.startOfDay(for: Date()).timeIntervalSince1970
 
-        let sql = "SELECT id, app_id, window_title, start_time, end_time, is_idle FROM activity_logs WHERE start_time >= ? ORDER BY start_time DESC"
+        let sql = "SELECT id, app_id, window_title, start_time, end_time, is_idle, tag_id FROM activity_logs WHERE start_time >= ? ORDER BY start_time DESC"
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
 
@@ -201,7 +221,7 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
     }
 
     func fetchAppInfo(appId: Int64) throws -> AppInfo? {
-        let sql = "SELECT id, bundle_id, app_name, icon FROM apps WHERE id = ?"
+        let sql = "SELECT id, bundle_id, app_name, icon, default_tag_id FROM apps WHERE id = ?"
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
 
@@ -226,10 +246,166 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
                 }
             }
 
-            return AppInfo(id: id, bundleId: bundleId, appName: appName, icon: icon)
+            let defaultTagId: Int64? = sqlite3_column_type(stmt, 4) != SQLITE_NULL
+                ? sqlite3_column_int64(stmt, 4) : nil
+            return AppInfo(id: id, bundleId: bundleId, appName: appName, icon: icon, defaultTagId: defaultTagId)
         }
 
         return nil
+    }
+
+    // MARK: - Tag CRUD
+
+    func createTag(name: String, colorLight: String, colorDark: String) throws -> Tag {
+        let sql = "INSERT INTO tags (name, color_light, color_dark) VALUES (?, ?, ?)"
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        sqlite3_bind_text(stmt, 1, (name as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 2, (colorLight as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 3, (colorDark as NSString).utf8String, -1, nil)
+
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            throw DBError.insertFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        let id = sqlite3_last_insert_rowid(db)
+        return Tag(id: id, name: name, colorLight: colorLight, colorDark: colorDark)
+    }
+
+    func fetchAllTags() throws -> [Tag] {
+        let sql = "SELECT id, name, color_light, color_dark FROM tags ORDER BY name"
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        var tags: [Tag] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            tags.append(tagFromStatement(stmt!))
+        }
+        return tags
+    }
+
+    func updateTag(id: Int64, name: String, colorLight: String, colorDark: String) throws {
+        let sql = "UPDATE tags SET name = ?, color_light = ?, color_dark = ? WHERE id = ?"
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        sqlite3_bind_text(stmt, 1, (name as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 2, (colorLight as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 3, (colorDark as NSString).utf8String, -1, nil)
+        sqlite3_bind_int64(stmt, 4, id)
+
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            throw DBError.updateFailed(String(cString: sqlite3_errmsg(db)))
+        }
+    }
+
+    func deleteTag(id: Int64) throws {
+        try execute("UPDATE apps SET default_tag_id = NULL WHERE default_tag_id = \(id)")
+        try execute("UPDATE activity_logs SET tag_id = NULL WHERE tag_id = \(id)")
+        try execute("DELETE FROM tags WHERE id = \(id)")
+    }
+
+    private func tagFromStatement(_ stmt: OpaquePointer) -> Tag {
+        let id = sqlite3_column_int64(stmt, 0)
+        let name = String(cString: sqlite3_column_text(stmt, 1))
+        let colorLight = String(cString: sqlite3_column_text(stmt, 2))
+        let colorDark = String(cString: sqlite3_column_text(stmt, 3))
+        return Tag(id: id, name: name, colorLight: colorLight, colorDark: colorDark)
+    }
+
+    func setDefaultTag(appId: Int64, tagId: Int64?) throws {
+        let sql = "UPDATE apps SET default_tag_id = ? WHERE id = ?"
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        if let tagId = tagId {
+            sqlite3_bind_int64(stmt, 1, tagId)
+        } else {
+            sqlite3_bind_null(stmt, 1)
+        }
+        sqlite3_bind_int64(stmt, 2, appId)
+
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            throw DBError.updateFailed(String(cString: sqlite3_errmsg(db)))
+        }
+    }
+
+    func setSessionTag(logId: Int64, tagId: Int64?) throws {
+        let sql = "UPDATE activity_logs SET tag_id = ? WHERE id = ?"
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        if let tagId = tagId {
+            sqlite3_bind_int64(stmt, 1, tagId)
+        } else {
+            sqlite3_bind_null(stmt, 1)
+        }
+        sqlite3_bind_int64(stmt, 2, logId)
+
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            throw DBError.updateFailed(String(cString: sqlite3_errmsg(db)))
+        }
+    }
+
+    func fetchTagSummaries(from: Date, to: Date) throws -> [TagSummary] {
+        let sql = """
+            SELECT t.id, t.name, t.color_light, t.color_dark,
+                   SUM(l.end_time - l.start_time) as total_duration
+            FROM activity_logs l
+            JOIN apps a ON a.id = l.app_id
+            LEFT JOIN tags t ON t.id = COALESCE(l.tag_id, a.default_tag_id)
+            WHERE l.start_time >= ? AND l.end_time <= ? AND l.is_idle = 0
+            GROUP BY COALESCE(l.tag_id, a.default_tag_id)
+            ORDER BY total_duration DESC
+        """
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        sqlite3_bind_double(stmt, 1, from.timeIntervalSince1970)
+        sqlite3_bind_double(stmt, 2, to.timeIntervalSince1970)
+
+        var summaries: [TagSummary] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let tag: Tag?
+            if sqlite3_column_type(stmt, 0) != SQLITE_NULL {
+                tag = Tag(
+                    id: sqlite3_column_int64(stmt, 0),
+                    name: String(cString: sqlite3_column_text(stmt, 1)),
+                    colorLight: String(cString: sqlite3_column_text(stmt, 2)),
+                    colorDark: String(cString: sqlite3_column_text(stmt, 3))
+                )
+            } else {
+                tag = nil
+            }
+            let totalDuration = sqlite3_column_double(stmt, 4)
+            summaries.append(TagSummary(tag: tag, totalDuration: totalDuration))
+        }
+        return summaries
     }
 
     private func logFromStatement(_ stmt: OpaquePointer) -> ActivityLog {
@@ -240,8 +416,10 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
         let startTime = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 3))
         let endTime = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 4))
         let isIdle = sqlite3_column_int(stmt, 5) != 0
+        let tagId: Int64? = sqlite3_column_type(stmt, 6) != SQLITE_NULL
+            ? sqlite3_column_int64(stmt, 6) : nil
 
-        return ActivityLog(id: id, appId: appId, windowTitle: windowTitle, startTime: startTime, endTime: endTime, isIdle: isIdle)
+        return ActivityLog(id: id, appId: appId, windowTitle: windowTitle, startTime: startTime, endTime: endTime, isIdle: isIdle, tagId: tagId)
     }
 
     private func execute(_ sql: String) throws {
@@ -251,6 +429,24 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
             sqlite3_free(error)
             throw DBError.execFailed(message)
         }
+    }
+
+    private func fetchColumnNames(table: String) throws -> [String] {
+        let sql = "PRAGMA table_info(\(table))"
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        var names: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let cStr = sqlite3_column_text(stmt, 1) {
+                names.append(String(cString: cStr))
+            }
+        }
+        return names
     }
 
     enum DBError: Error {
