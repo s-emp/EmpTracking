@@ -76,7 +76,10 @@ final class ActivityTracker {
 
     private func startNewLog(appName: String, bundleId: String, windowTitle: String?, isIdle: Bool, icon: Data?) {
         do {
-            let appId = try db.insertOrGetApp(bundleId: bundleId, appName: appName, iconPNG: icon)
+            let appId = try db.insertOrGetApp(bundleId: bundleId, appName: appName)
+            if let iconData = icon {
+                try db.insertOrUpdateIcon(appId: appId, iconPNG: iconData)
+            }
             let now = Date()
             let logId = try db.insertActivityLog(appId: appId, windowTitle: windowTitle, startTime: now, endTime: now, isIdle: isIdle)
             currentLogId = logId

@@ -66,9 +66,27 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
         if !logsColumns.contains("tag_id") {
             try execute("ALTER TABLE activity_logs ADD COLUMN tag_id INTEGER REFERENCES tags(id)")
         }
+
+        // Migration: extract icons into separate table
+        try execute("""
+            CREATE TABLE IF NOT EXISTS app_icons (
+                app_id INTEGER PRIMARY KEY REFERENCES apps(id),
+                icon BLOB NOT NULL
+            )
+        """)
+        let iconCount = try fetchScalarInt("SELECT COUNT(*) FROM app_icons")
+        if iconCount == 0 {
+            try execute("INSERT OR IGNORE INTO app_icons (app_id, icon) SELECT id, icon FROM apps WHERE icon IS NOT NULL")
+        }
+        // Clear legacy icon column and reclaim space
+        let legacyIconCount = try fetchScalarInt("SELECT COUNT(*) FROM apps WHERE icon IS NOT NULL")
+        if legacyIconCount > 0 {
+            try execute("UPDATE apps SET icon = NULL")
+            try execute("VACUUM")
+        }
     }
 
-    func insertOrGetApp(bundleId: String, appName: String, iconPNG: Data?) throws -> Int64 {
+    func insertOrGetApp(bundleId: String, appName: String) throws -> Int64 {
         let query = "SELECT id FROM apps WHERE bundle_id = ?"
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
@@ -82,17 +100,10 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
         sqlite3_finalize(stmt)
         stmt = nil
 
-        let insert = "INSERT INTO apps (bundle_id, app_name, icon) VALUES (?, ?, ?)"
+        let insert = "INSERT INTO apps (bundle_id, app_name) VALUES (?, ?)"
         if sqlite3_prepare_v2(db, insert, -1, &stmt, nil) == SQLITE_OK {
             sqlite3_bind_text(stmt, 1, (bundleId as NSString).utf8String, -1, nil)
             sqlite3_bind_text(stmt, 2, (appName as NSString).utf8String, -1, nil)
-            if let iconData = iconPNG {
-                _ = iconData.withUnsafeBytes { rawBuffer in
-                    sqlite3_bind_blob(stmt, 3, rawBuffer.baseAddress, Int32(iconData.count), nil)
-                }
-            } else {
-                sqlite3_bind_null(stmt, 3)
-            }
 
             if sqlite3_step(stmt) != SQLITE_DONE {
                 throw DBError.insertFailed(String(cString: sqlite3_errmsg(db)))
@@ -100,6 +111,25 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
         }
 
         return sqlite3_last_insert_rowid(db)
+    }
+
+    func insertOrUpdateIcon(appId: Int64, iconPNG: Data) throws {
+        let sql = "INSERT OR REPLACE INTO app_icons (app_id, icon) VALUES (?, ?)"
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        sqlite3_bind_int64(stmt, 1, appId)
+        _ = iconPNG.withUnsafeBytes { rawBuffer in
+            sqlite3_bind_blob(stmt, 2, rawBuffer.baseAddress, Int32(iconPNG.count), nil)
+        }
+
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            throw DBError.insertFailed(String(cString: sqlite3_errmsg(db)))
+        }
     }
 
     func insertActivityLog(appId: Int64, windowTitle: String?, startTime: Date, endTime: Date, isIdle: Bool) throws -> Int64 {
@@ -204,10 +234,11 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
 
     func fetchAppSummaries(since: Date) throws -> [AppSummary] {
         let sql = """
-            SELECT a.id, a.app_name, a.bundle_id, a.icon,
+            SELECT a.id, a.app_name, a.bundle_id, ai.icon,
                    SUM(l.end_time - l.start_time) as total_duration
             FROM activity_logs l
             JOIN apps a ON a.id = l.app_id
+            LEFT JOIN app_icons ai ON ai.app_id = a.id
             WHERE l.start_time >= ? AND l.is_idle = 0
             GROUP BY l.app_id
             ORDER BY total_duration DESC
@@ -245,7 +276,12 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
     }
 
     func fetchAppInfo(appId: Int64) throws -> AppInfo? {
-        let sql = "SELECT id, bundle_id, app_name, icon, default_tag_id FROM apps WHERE id = ?"
+        let sql = """
+            SELECT a.id, a.bundle_id, a.app_name, ai.icon, a.default_tag_id
+            FROM apps a
+            LEFT JOIN app_icons ai ON ai.app_id = a.id
+            WHERE a.id = ?
+        """
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
 
@@ -528,6 +564,20 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
             sqlite3_free(error)
             throw DBError.execFailed(message)
         }
+    }
+
+    private func fetchScalarInt(_ sql: String) throws -> Int {
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            return Int(sqlite3_column_int(stmt, 0))
+        }
+        return 0
     }
 
     private func fetchColumnNames(table: String) throws -> [String] {

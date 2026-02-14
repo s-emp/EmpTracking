@@ -20,17 +20,17 @@ struct DatabaseManagerTests {
     @Test func insertsAndRetrievesApp() throws {
         let db = try makeTestDB()
 
-        let appId = try db.insertOrGetApp(bundleId: "com.test.app", appName: "TestApp", iconPNG: nil)
+        let appId = try db.insertOrGetApp(bundleId: "com.test.app", appName: "TestApp")
         #expect(appId > 0)
 
-        let sameId = try db.insertOrGetApp(bundleId: "com.test.app", appName: "TestApp", iconPNG: nil)
+        let sameId = try db.insertOrGetApp(bundleId: "com.test.app", appName: "TestApp")
         #expect(sameId == appId)
     }
 
     @Test func insertsAndUpdatesActivityLog() throws {
         let db = try makeTestDB()
 
-        let appId = try db.insertOrGetApp(bundleId: "com.test.app", appName: "TestApp", iconPNG: nil)
+        let appId = try db.insertOrGetApp(bundleId: "com.test.app", appName: "TestApp")
         let now = Date()
 
         let logId = try db.insertActivityLog(
@@ -53,7 +53,7 @@ struct DatabaseManagerTests {
     @Test func fetchesLastLog() throws {
         let db = try makeTestDB()
 
-        let appId = try db.insertOrGetApp(bundleId: "com.test.app", appName: "TestApp", iconPNG: nil)
+        let appId = try db.insertOrGetApp(bundleId: "com.test.app", appName: "TestApp")
         let now = Date()
 
         _ = try db.insertActivityLog(appId: appId, windowTitle: "First", startTime: now, endTime: now, isIdle: false)
@@ -95,7 +95,7 @@ struct DatabaseManagerTests {
     @Test func deletesTagAndNullifiesReferences() throws {
         let db = try makeTestDB()
         let tag = try db.createTag(name: "work", colorLight: "#4CAF50", colorDark: "#81C784")
-        let appId = try db.insertOrGetApp(bundleId: "com.test.app", appName: "TestApp", iconPNG: nil)
+        let appId = try db.insertOrGetApp(bundleId: "com.test.app", appName: "TestApp")
         try db.setDefaultTag(appId: appId, tagId: tag.id)
         let now = Date()
         let logId = try db.insertActivityLog(appId: appId, windowTitle: "W", startTime: now, endTime: now, isIdle: false)
@@ -120,7 +120,7 @@ struct DatabaseManagerTests {
     @Test func setsDefaultTagForApp() throws {
         let db = try makeTestDB()
         let tag = try db.createTag(name: "work", colorLight: "#4CAF50", colorDark: "#81C784")
-        let appId = try db.insertOrGetApp(bundleId: "com.test.app", appName: "TestApp", iconPNG: nil)
+        let appId = try db.insertOrGetApp(bundleId: "com.test.app", appName: "TestApp")
         try db.setDefaultTag(appId: appId, tagId: tag.id)
         let info = try db.fetchAppInfo(appId: appId)
         #expect(info?.defaultTagId == tag.id)
@@ -129,7 +129,7 @@ struct DatabaseManagerTests {
     @Test func setsSessionTag() throws {
         let db = try makeTestDB()
         let tag = try db.createTag(name: "work", colorLight: "#4CAF50", colorDark: "#81C784")
-        let appId = try db.insertOrGetApp(bundleId: "com.test.app", appName: "TestApp", iconPNG: nil)
+        let appId = try db.insertOrGetApp(bundleId: "com.test.app", appName: "TestApp")
         let now = Date()
         let logId = try db.insertActivityLog(appId: appId, windowTitle: "W", startTime: now, endTime: now, isIdle: false)
         try db.setSessionTag(logId: logId, tagId: tag.id)
@@ -140,7 +140,7 @@ struct DatabaseManagerTests {
     @Test func clearsSessionTag() throws {
         let db = try makeTestDB()
         let tag = try db.createTag(name: "work", colorLight: "#4CAF50", colorDark: "#81C784")
-        let appId = try db.insertOrGetApp(bundleId: "com.test.app", appName: "TestApp", iconPNG: nil)
+        let appId = try db.insertOrGetApp(bundleId: "com.test.app", appName: "TestApp")
         let now = Date()
         let logId = try db.insertActivityLog(appId: appId, windowTitle: "W", startTime: now, endTime: now, isIdle: false)
         try db.setSessionTag(logId: logId, tagId: tag.id)
@@ -154,8 +154,8 @@ struct DatabaseManagerTests {
         let workTag = try db.createTag(name: "work", colorLight: "#4CAF50", colorDark: "#81C784")
         let chillTag = try db.createTag(name: "chill", colorLight: "#2196F3", colorDark: "#64B5F6")
 
-        let app1 = try db.insertOrGetApp(bundleId: "com.test.xcode", appName: "Xcode", iconPNG: nil)
-        let app2 = try db.insertOrGetApp(bundleId: "com.test.safari", appName: "Safari", iconPNG: nil)
+        let app1 = try db.insertOrGetApp(bundleId: "com.test.xcode", appName: "Xcode")
+        let app2 = try db.insertOrGetApp(bundleId: "com.test.safari", appName: "Safari")
 
         try db.setDefaultTag(appId: app1, tagId: workTag.id)
         try db.setDefaultTag(appId: app2, tagId: chillTag.id)
@@ -182,8 +182,8 @@ struct DatabaseManagerTests {
         let workTag = try db.createTag(name: "work", colorLight: "#4CAF50", colorDark: "#81C784")
         let chillTag = try db.createTag(name: "chill", colorLight: "#2196F3", colorDark: "#64B5F6")
 
-        let app1 = try db.insertOrGetApp(bundleId: "com.test.xcode", appName: "Xcode", iconPNG: nil)
-        let app2 = try db.insertOrGetApp(bundleId: "com.test.safari", appName: "Safari", iconPNG: nil)
+        let app1 = try db.insertOrGetApp(bundleId: "com.test.xcode", appName: "Xcode")
+        let app2 = try db.insertOrGetApp(bundleId: "com.test.safari", appName: "Safari")
         try db.setDefaultTag(appId: app1, tagId: workTag.id)
 
         let cal = Calendar.current
@@ -225,7 +225,7 @@ struct DatabaseManagerTests {
         let db = try makeTestDB()
         let workTag = try db.createTag(name: "work", colorLight: "#4CAF50", colorDark: "#81C784")
 
-        let app1 = try db.insertOrGetApp(bundleId: "com.test.xcode", appName: "Xcode", iconPNG: nil)
+        let app1 = try db.insertOrGetApp(bundleId: "com.test.xcode", appName: "Xcode")
         try db.setDefaultTag(appId: app1, tagId: workTag.id)
 
         let cal = Calendar.current
@@ -256,7 +256,7 @@ struct DatabaseManagerTests {
 
     @Test func fetchesLogsInRange() throws {
         let db = try makeTestDB()
-        let appId = try db.insertOrGetApp(bundleId: "com.test.app", appName: "TestApp", iconPNG: nil)
+        let appId = try db.insertOrGetApp(bundleId: "com.test.app", appName: "TestApp")
 
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
@@ -271,6 +271,37 @@ struct DatabaseManagerTests {
 
         let allLogs = try db.fetchLogs(from: yesterday, to: today.addingTimeInterval(86400))
         #expect(allLogs.count == 2)
+    }
+
+    @Test func insertsAndRetrievesIcon() throws {
+        let db = try makeTestDB()
+        let appId = try db.insertOrGetApp(bundleId: "com.test.app", appName: "TestApp")
+
+        // App without icon
+        let infoNoIcon = try db.fetchAppInfo(appId: appId)
+        #expect(infoNoIcon?.icon == nil)
+
+        // Create a minimal valid 1x1 PNG
+        let pngData = Data([
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
+            0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR chunk
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+            0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+            0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, // IDAT chunk
+            0x54, 0x08, 0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00,
+            0x00, 0x00, 0x02, 0x00, 0x01, 0xE2, 0x21, 0xBC,
+            0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, // IEND chunk
+            0x44, 0xAE, 0x42, 0x60, 0x82
+        ])
+
+        try db.insertOrUpdateIcon(appId: appId, iconPNG: pngData)
+        let infoWithIcon = try db.fetchAppInfo(appId: appId)
+        #expect(infoWithIcon?.icon != nil)
+
+        // Update icon (should replace, not duplicate)
+        try db.insertOrUpdateIcon(appId: appId, iconPNG: pngData)
+        let infoUpdated = try db.fetchAppInfo(appId: appId)
+        #expect(infoUpdated?.icon != nil)
     }
 
     private func makeTestDB() throws -> DatabaseManager {
