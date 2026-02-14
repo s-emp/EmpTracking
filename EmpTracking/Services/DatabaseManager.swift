@@ -449,6 +449,45 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
         return result
     }
 
+    func fetchDailyTagSummaries(from: Date, to: Date) throws -> [Date: [TagSlotDuration]] {
+        let sql = """
+            SELECT date(l.start_time, 'unixepoch', 'localtime') as day,
+                   COALESCE(l.tag_id, a.default_tag_id) as resolved_tag_id,
+                   SUM(l.end_time - l.start_time) as total_duration
+            FROM activity_logs l
+            JOIN apps a ON a.id = l.app_id
+            WHERE l.start_time >= ? AND l.start_time < ? AND l.is_idle = 0
+            GROUP BY day, resolved_tag_id
+            ORDER BY day, total_duration DESC
+        """
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        sqlite3_bind_double(stmt, 1, from.timeIntervalSince1970)
+        sqlite3_bind_double(stmt, 2, to.timeIntervalSince1970)
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        dateFormatter.timeZone = .current
+
+        var result: [Date: [TagSlotDuration]] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let dayStr = String(cString: sqlite3_column_text(stmt, 0))
+            let tagId: Int64? = sqlite3_column_type(stmt, 1) != SQLITE_NULL
+                ? sqlite3_column_int64(stmt, 1) : nil
+            let duration = sqlite3_column_double(stmt, 2)
+
+            if let dayDate = dateFormatter.date(from: dayStr) {
+                result[dayDate, default: []].append(TagSlotDuration(tagId: tagId, duration: duration))
+            }
+        }
+        return result
+    }
+
     private func logFromStatement(_ stmt: OpaquePointer) -> ActivityLog {
         let id = sqlite3_column_int64(stmt, 0)
         let appId = sqlite3_column_int64(stmt, 1)

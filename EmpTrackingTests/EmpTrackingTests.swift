@@ -221,6 +221,39 @@ struct DatabaseManagerTests {
         #expect(result[11] == nil || result[11]!.isEmpty)
     }
 
+    @Test func fetchesDailyTagSummaries() throws {
+        let db = try makeTestDB()
+        let workTag = try db.createTag(name: "work", colorLight: "#4CAF50", colorDark: "#81C784")
+
+        let app1 = try db.insertOrGetApp(bundleId: "com.test.xcode", appName: "Xcode", iconPNG: nil)
+        try db.setDefaultTag(appId: app1, tagId: workTag.id)
+
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let yesterday = today.addingTimeInterval(-86400)
+
+        // Yesterday: 1 hour of work
+        _ = try db.insertActivityLog(appId: app1, windowTitle: "W", startTime: yesterday.addingTimeInterval(9 * 3600), endTime: yesterday.addingTimeInterval(10 * 3600), isIdle: false)
+
+        // Today: 30 min of work
+        _ = try db.insertActivityLog(appId: app1, windowTitle: "W", startTime: today.addingTimeInterval(9 * 3600), endTime: today.addingTimeInterval(9 * 3600 + 1800), isIdle: false)
+
+        let weekStart = yesterday.addingTimeInterval(-5 * 86400)
+        let weekEnd = today.addingTimeInterval(86400)
+        let result = try db.fetchDailyTagSummaries(from: weekStart, to: weekEnd)
+
+        let yesterdayKey = cal.startOfDay(for: yesterday)
+        let todayKey = cal.startOfDay(for: today)
+
+        let yesterdaySlots = result[yesterdayKey] ?? []
+        let todaySlots = result[todayKey] ?? []
+
+        #expect(yesterdaySlots.count == 1)
+        #expect(Int(yesterdaySlots[0].duration) == 3600)
+        #expect(todaySlots.count == 1)
+        #expect(Int(todaySlots[0].duration) == 1800)
+    }
+
     private func makeTestDB() throws -> DatabaseManager {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
