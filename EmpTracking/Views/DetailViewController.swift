@@ -22,6 +22,14 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
     private var dailyData: [Date: [TagSlotDuration]] = [:]
     private var slotDates: [Date] = []
 
+    // Formatters
+    private let weekDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ru_RU")
+        f.dateFormat = "EE"
+        return f
+    }()
+
     // UI elements
     private let dateLabel = NSTextField(labelWithString: "")
     private let prevButton = NSButton()
@@ -34,6 +42,7 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
     private let totalLabel = NSTextField(labelWithString: "")
     private let scrollView = NSScrollView()
     private let tableView = NSTableView()
+    private var calendarPopover: NSPopover?
 
     init(db: DatabaseManager) {
         self.db = db
@@ -221,6 +230,7 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
         popover.contentViewController = vc
         popover.behavior = .transient
         popover.show(relativeTo: calendarButton.bounds, of: calendarButton, preferredEdge: .minY)
+        calendarPopover = popover
 
         picker.target = self
         picker.action = #selector(calendarDatePicked(_:))
@@ -229,6 +239,8 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
     @objc private func calendarDatePicked(_ sender: NSDatePicker) {
         anchorDate = sender.dateValue
         selectedSlot = nil
+        calendarPopover?.close()
+        calendarPopover = nil
         reload()
     }
 
@@ -248,7 +260,6 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
     func reload() {
         updateDateLabel()
         loadTimelineData()
-        loadTableData()
         timelineCollectionView.reloadData()
         reloadTable()
     }
@@ -412,10 +423,7 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
             slotData = hourlyData[slot] ?? []
             maxDuration = 3600
         case .week:
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "ru_RU")
-            formatter.dateFormat = "EE"
-            label = slot < slotDates.count ? formatter.string(from: slotDates[slot]) : ""
+            label = slot < slotDates.count ? weekDayFormatter.string(from: slotDates[slot]) : ""
             slotData = slot < slotDates.count ? (dailyData[slotDates[slot]] ?? []) : []
             maxDuration = 86400
         case .month:
@@ -464,7 +472,7 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
         case .week: count = 7
         case .month: count = CGFloat(slotDates.count)
         }
-        let width = max(collectionView.bounds.width / count, 14)
+        let width = count > 0 ? max(collectionView.bounds.width / count, 14) : 14
         return NSSize(width: width, height: collectionView.bounds.height)
     }
 
