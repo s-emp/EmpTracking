@@ -1,17 +1,36 @@
 import Cocoa
 
-final class DetailViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
+final class DetailViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSCollectionViewDataSource, NSCollectionViewDelegateFlowLayout {
     private let db: DatabaseManager
     private var logs: [ActivityLog] = []
+    private var filteredLogs: [ActivityLog] = []
     private var tagSummaries: [TagSummary] = []
     private var appCache: [Int64: AppInfo] = [:]
     private var tagCache: [Int64: Tag] = [:]
 
-    private enum Mode: Int { case apps = 0, tags = 1 }
-    private var mode: Mode = .apps
+    private enum TableMode: Int { case apps = 0, tags = 1 }
+    private var tableMode: TableMode = .apps
 
-    private let segmentedControl = NSSegmentedControl()
-    private let headerLabel = NSTextField(labelWithString: "")
+    private enum TimelineMode: Int { case day = 0, week = 1, month = 2 }
+    private var timelineMode: TimelineMode = .day
+
+    private var anchorDate = Date()
+    private var selectedSlot: Int? = nil
+
+    // Timeline data
+    private var hourlyData: [Int: [TagSlotDuration]] = [:]
+    private var dailyData: [Date: [TagSlotDuration]] = [:]
+    private var slotDates: [Date] = []
+
+    // UI elements
+    private let dateLabel = NSTextField(labelWithString: "")
+    private let prevButton = NSButton()
+    private let nextButton = NSButton()
+    private let calendarButton = NSButton()
+    private let timelineModeControl = NSSegmentedControl()
+    private let timelineCollectionView = NSCollectionView()
+    private let timelineScrollView = NSScrollView()
+    private let tableModeControl = NSSegmentedControl()
     private let totalLabel = NSTextField(labelWithString: "")
     private let scrollView = NSScrollView()
     private let tableView = NSTableView()
@@ -26,28 +45,86 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
     }
 
     override func loadView() {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 500, height: 600))
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 700))
         self.view = container
 
-        headerLabel.translatesAutoresizingMaskIntoConstraints = false
-        headerLabel.font = .systemFont(ofSize: 15, weight: .semibold)
-        container.addSubview(headerLabel)
+        // Navigation row
+        dateLabel.translatesAutoresizingMaskIntoConstraints = false
+        dateLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        dateLabel.lineBreakMode = .byTruncatingTail
+        dateLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        container.addSubview(dateLabel)
+
+        prevButton.translatesAutoresizingMaskIntoConstraints = false
+        prevButton.bezelStyle = .inline
+        prevButton.title = "\u{2039}"
+        prevButton.font = .systemFont(ofSize: 16, weight: .medium)
+        prevButton.target = self
+        prevButton.action = #selector(prevTapped)
+        container.addSubview(prevButton)
+
+        calendarButton.translatesAutoresizingMaskIntoConstraints = false
+        calendarButton.bezelStyle = .inline
+        calendarButton.image = NSImage(systemSymbolName: "calendar", accessibilityDescription: "Calendar")
+        calendarButton.target = self
+        calendarButton.action = #selector(calendarTapped)
+        container.addSubview(calendarButton)
+
+        nextButton.translatesAutoresizingMaskIntoConstraints = false
+        nextButton.bezelStyle = .inline
+        nextButton.title = "\u{203A}"
+        nextButton.font = .systemFont(ofSize: 16, weight: .medium)
+        nextButton.target = self
+        nextButton.action = #selector(nextTapped)
+        container.addSubview(nextButton)
+
+        timelineModeControl.translatesAutoresizingMaskIntoConstraints = false
+        timelineModeControl.segmentCount = 3
+        timelineModeControl.setLabel("\u{0414}\u{0435}\u{043D}\u{044C}", forSegment: 0)
+        timelineModeControl.setLabel("\u{041D}\u{0435}\u{0434}\u{0435}\u{043B}\u{044F}", forSegment: 1)
+        timelineModeControl.setLabel("\u{041C}\u{0435}\u{0441}\u{044F}\u{0446}", forSegment: 2)
+        timelineModeControl.selectedSegment = 0
+        timelineModeControl.target = self
+        timelineModeControl.action = #selector(timelineModeChanged(_:))
+        timelineModeControl.segmentStyle = .rounded
+        container.addSubview(timelineModeControl)
+
+        // Timeline collection
+        let flowLayout = NSCollectionViewFlowLayout()
+        flowLayout.scrollDirection = .horizontal
+        flowLayout.minimumInteritemSpacing = 0
+        flowLayout.minimumLineSpacing = 0
+
+        timelineCollectionView.collectionViewLayout = flowLayout
+        timelineCollectionView.dataSource = self
+        timelineCollectionView.delegate = self
+        timelineCollectionView.register(TimelineCell.self, forItemWithIdentifier: NSUserInterfaceItemIdentifier("TimelineCell"))
+        timelineCollectionView.backgroundColors = [.clear]
+
+        timelineScrollView.translatesAutoresizingMaskIntoConstraints = false
+        timelineScrollView.documentView = timelineCollectionView
+        timelineScrollView.hasHorizontalScroller = false
+        timelineScrollView.hasVerticalScroller = false
+        timelineScrollView.drawsBackground = false
+        container.addSubview(timelineScrollView)
+
+        // Table mode controls
+        tableModeControl.translatesAutoresizingMaskIntoConstraints = false
+        tableModeControl.segmentCount = 2
+        tableModeControl.setLabel("\u{041F}\u{0440}\u{0438}\u{043B}\u{043E}\u{0436}\u{0435}\u{043D}\u{0438}\u{044F}", forSegment: 0)
+        tableModeControl.setLabel("\u{0422}\u{0435}\u{0433}\u{0438}", forSegment: 1)
+        tableModeControl.selectedSegment = 0
+        tableModeControl.target = self
+        tableModeControl.action = #selector(tableModeChanged(_:))
+        tableModeControl.segmentStyle = .rounded
+        container.addSubview(tableModeControl)
 
         totalLabel.translatesAutoresizingMaskIntoConstraints = false
         totalLabel.font = .systemFont(ofSize: 12)
         totalLabel.textColor = .secondaryLabelColor
         container.addSubview(totalLabel)
 
-        segmentedControl.translatesAutoresizingMaskIntoConstraints = false
-        segmentedControl.segmentCount = 2
-        segmentedControl.setLabel("Приложения", forSegment: 0)
-        segmentedControl.setLabel("Теги", forSegment: 1)
-        segmentedControl.selectedSegment = 0
-        segmentedControl.target = self
-        segmentedControl.action = #selector(segmentChanged(_:))
-        segmentedControl.segmentStyle = .rounded
-        container.addSubview(segmentedControl)
-
+        // Session table
         let column = NSTableColumn(identifier: .init("detail"))
         column.title = ""
         tableView.addTableColumn(column)
@@ -64,18 +141,37 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
         tableView.backgroundColor = .clear
         container.addSubview(scrollView)
 
-        NSLayoutConstraint.activate([
-            headerLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
-            headerLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+        let timelineHeight: CGFloat = 160
 
-            totalLabel.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
+        NSLayoutConstraint.activate([
+            dateLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
+            dateLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+
+            prevButton.centerYAnchor.constraint(equalTo: dateLabel.centerYAnchor),
+            prevButton.leadingAnchor.constraint(greaterThanOrEqualTo: dateLabel.trailingAnchor, constant: 8),
+
+            calendarButton.centerYAnchor.constraint(equalTo: dateLabel.centerYAnchor),
+            calendarButton.leadingAnchor.constraint(equalTo: prevButton.trailingAnchor, constant: 2),
+
+            nextButton.centerYAnchor.constraint(equalTo: dateLabel.centerYAnchor),
+            nextButton.leadingAnchor.constraint(equalTo: calendarButton.trailingAnchor, constant: 2),
+
+            timelineModeControl.centerYAnchor.constraint(equalTo: dateLabel.centerYAnchor),
+            timelineModeControl.leadingAnchor.constraint(equalTo: nextButton.trailingAnchor, constant: 12),
+            timelineModeControl.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+
+            timelineScrollView.topAnchor.constraint(equalTo: dateLabel.bottomAnchor, constant: 8),
+            timelineScrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            timelineScrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            timelineScrollView.heightAnchor.constraint(equalToConstant: timelineHeight),
+
+            tableModeControl.topAnchor.constraint(equalTo: timelineScrollView.bottomAnchor, constant: 8),
+            tableModeControl.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+
+            totalLabel.centerYAnchor.constraint(equalTo: tableModeControl.centerYAnchor),
             totalLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
 
-            segmentedControl.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 8),
-            segmentedControl.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            segmentedControl.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-
-            scrollView.topAnchor.constraint(equalTo: segmentedControl.bottomAnchor, constant: 8),
+            scrollView.topAnchor.constraint(equalTo: tableModeControl.bottomAnchor, constant: 8),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
@@ -87,57 +183,297 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
         reload()
     }
 
-    @objc private func segmentChanged(_ sender: NSSegmentedControl) {
-        mode = Mode(rawValue: sender.selectedSegment) ?? .apps
+    // MARK: - Navigation Actions
+
+    @objc private func prevTapped() {
+        let cal = Calendar.current
+        switch timelineMode {
+        case .day: anchorDate = cal.date(byAdding: .day, value: -1, to: anchorDate)!
+        case .week: anchorDate = cal.date(byAdding: .weekOfYear, value: -1, to: anchorDate)!
+        case .month: anchorDate = cal.date(byAdding: .month, value: -1, to: anchorDate)!
+        }
+        selectedSlot = nil
         reload()
     }
 
+    @objc private func nextTapped() {
+        let cal = Calendar.current
+        switch timelineMode {
+        case .day: anchorDate = cal.date(byAdding: .day, value: 1, to: anchorDate)!
+        case .week: anchorDate = cal.date(byAdding: .weekOfYear, value: 1, to: anchorDate)!
+        case .month: anchorDate = cal.date(byAdding: .month, value: 1, to: anchorDate)!
+        }
+        selectedSlot = nil
+        reload()
+    }
+
+    @objc private func calendarTapped() {
+        let picker = NSDatePicker()
+        picker.datePickerStyle = .clockAndCalendar
+        picker.datePickerElements = .yearMonthDay
+        picker.dateValue = anchorDate
+
+        let vc = NSViewController()
+        vc.view = picker
+        vc.preferredContentSize = picker.fittingSize
+
+        let popover = NSPopover()
+        popover.contentViewController = vc
+        popover.behavior = .transient
+        popover.show(relativeTo: calendarButton.bounds, of: calendarButton, preferredEdge: .minY)
+
+        picker.target = self
+        picker.action = #selector(calendarDatePicked(_:))
+    }
+
+    @objc private func calendarDatePicked(_ sender: NSDatePicker) {
+        anchorDate = sender.dateValue
+        selectedSlot = nil
+        reload()
+    }
+
+    @objc private func timelineModeChanged(_ sender: NSSegmentedControl) {
+        timelineMode = TimelineMode(rawValue: sender.selectedSegment) ?? .day
+        selectedSlot = nil
+        reload()
+    }
+
+    @objc private func tableModeChanged(_ sender: NSSegmentedControl) {
+        tableMode = TableMode(rawValue: sender.selectedSegment) ?? .apps
+        reloadTable()
+    }
+
+    // MARK: - Data Loading
+
     func reload() {
+        updateDateLabel()
+        loadTimelineData()
+        loadTableData()
+        timelineCollectionView.reloadData()
+        reloadTable()
+    }
+
+    private func updateDateLabel() {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "ru_RU")
-        formatter.dateFormat = "d MMMM yyyy"
-        headerLabel.stringValue = formatter.string(from: Date())
 
-        let since = Calendar.current.startOfDay(for: Date())
+        switch timelineMode {
+        case .day:
+            formatter.dateFormat = "EEEE, d MMMM yyyy"
+            dateLabel.stringValue = formatter.string(from: anchorDate).localizedCapitalized
+        case .week:
+            let (start, end) = weekRange(for: anchorDate)
+            formatter.dateFormat = "d MMMM"
+            let startStr = formatter.string(from: start)
+            formatter.dateFormat = "d MMMM yyyy"
+            let endStr = formatter.string(from: end.addingTimeInterval(-1))
+            dateLabel.stringValue = "\(startStr) \u{2013} \(endStr)"
+        case .month:
+            formatter.dateFormat = "LLLL yyyy"
+            dateLabel.stringValue = formatter.string(from: anchorDate).localizedCapitalized
+        }
+    }
 
+    private func loadTimelineData() {
+        let cal = Calendar.current
         do {
-            // Always cache tags
             let allTags = try db.fetchAllTags()
             tagCache = Dictionary(uniqueKeysWithValues: allTags.map { ($0.id, $0) })
 
-            switch mode {
+            switch timelineMode {
+            case .day:
+                hourlyData = try db.fetchHourlyTagSummaries(for: anchorDate)
+                dailyData = [:]
+                slotDates = []
+            case .week:
+                let (start, end) = weekRange(for: anchorDate)
+                dailyData = try db.fetchDailyTagSummaries(from: start, to: end)
+                hourlyData = [:]
+                slotDates = (0..<7).compactMap { cal.date(byAdding: .day, value: $0, to: start) }
+            case .month:
+                let (start, end) = monthRange(for: anchorDate)
+                dailyData = try db.fetchDailyTagSummaries(from: start, to: end)
+                hourlyData = [:]
+                let days = cal.dateComponents([.day], from: start, to: end).day ?? 30
+                slotDates = (0..<days).compactMap { cal.date(byAdding: .day, value: $0, to: start) }
+            }
+        } catch {
+            print("Error loading timeline data: \(error)")
+        }
+    }
+
+    private func loadTableData() {
+        let (rangeStart, rangeEnd) = currentRange()
+        do {
+            switch tableMode {
             case .apps:
-                logs = try db.fetchTodayLogs()
+                logs = try db.fetchLogs(from: rangeStart, to: rangeEnd)
                 for log in logs where appCache[log.appId] == nil {
                     appCache[log.appId] = try db.fetchAppInfo(appId: log.appId)
                 }
-                let totalActive = logs.filter { !$0.isIdle }.reduce(0.0) {
-                    $0 + $1.endTime.timeIntervalSince($1.startTime)
-                }
-                let hours = Int(totalActive) / 3600
-                let minutes = (Int(totalActive) % 3600) / 60
-                totalLabel.stringValue = "Активно: \(hours)ч \(minutes)мин"
-
+                applySlotFilter()
             case .tags:
-                tagSummaries = try db.fetchTagSummaries(from: since, to: Date())
-                let total = tagSummaries.reduce(0.0) { $0 + $1.totalDuration }
-                let hours = Int(total) / 3600
-                let minutes = (Int(total) % 3600) / 60
-                totalLabel.stringValue = "Активно: \(hours)ч \(minutes)мин"
+                tagSummaries = try db.fetchTagSummaries(from: rangeStart, to: rangeEnd)
             }
         } catch {
-            print("Error fetching detail: \(error)")
+            print("Error loading table data: \(error)")
+        }
+    }
+
+    private func applySlotFilter() {
+        guard let slot = selectedSlot else {
+            filteredLogs = logs
+            return
+        }
+        let cal = Calendar.current
+        switch timelineMode {
+        case .day:
+            filteredLogs = logs.filter { cal.component(.hour, from: $0.startTime) == slot }
+        case .week, .month:
+            guard slot < slotDates.count else { filteredLogs = logs; return }
+            let dayStart = slotDates[slot]
+            let dayEnd = dayStart.addingTimeInterval(86400)
+            filteredLogs = logs.filter { $0.startTime >= dayStart && $0.startTime < dayEnd }
+        }
+    }
+
+    private func reloadTable() {
+        loadTableData()
+        let active: TimeInterval
+        switch tableMode {
+        case .apps:
+            active = filteredLogs.filter { !$0.isIdle }.reduce(0.0) { $0 + $1.endTime.timeIntervalSince($1.startTime) }
+        case .tags:
+            active = tagSummaries.reduce(0.0) { $0 + $1.totalDuration }
+        }
+        let hours = Int(active) / 3600
+        let minutes = (Int(active) % 3600) / 60
+        totalLabel.stringValue = "\u{0410}\u{043A}\u{0442}\u{0438}\u{0432}\u{043D}\u{043E}: \(hours)\u{0447} \(minutes)\u{043C}\u{0438}\u{043D}"
+        tableView.reloadData()
+    }
+
+    // MARK: - Date Helpers
+
+    private func weekRange(for date: Date) -> (Date, Date) {
+        let cal = Calendar.current
+        var start = cal.startOfDay(for: date)
+        let weekday = cal.component(.weekday, from: start)
+        let daysFromMonday = (weekday + 5) % 7
+        start = cal.date(byAdding: .day, value: -daysFromMonday, to: start)!
+        let end = cal.date(byAdding: .day, value: 7, to: start)!
+        return (start, end)
+    }
+
+    private func monthRange(for date: Date) -> (Date, Date) {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month], from: date)
+        let start = cal.date(from: comps)!
+        let end = cal.date(byAdding: .month, value: 1, to: start)!
+        return (start, end)
+    }
+
+    private func currentRange() -> (Date, Date) {
+        let cal = Calendar.current
+        switch timelineMode {
+        case .day:
+            let start = cal.startOfDay(for: anchorDate)
+            return (start, start.addingTimeInterval(86400))
+        case .week:
+            return weekRange(for: anchorDate)
+        case .month:
+            return monthRange(for: anchorDate)
+        }
+    }
+
+    // MARK: - NSCollectionViewDataSource
+
+    func numberOfSections(in collectionView: NSCollectionView) -> Int { 1 }
+
+    func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
+        switch timelineMode {
+        case .day: return 24
+        case .week: return 7
+        case .month: return slotDates.count
+        }
+    }
+
+    func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
+        let cell = collectionView.makeItem(withIdentifier: NSUserInterfaceItemIdentifier("TimelineCell"), for: indexPath) as! TimelineCell
+        let slot = indexPath.item
+        let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+
+        let label: String
+        let slotData: [TagSlotDuration]
+        let maxDuration: TimeInterval
+
+        switch timelineMode {
+        case .day:
+            label = "\(slot)"
+            slotData = hourlyData[slot] ?? []
+            maxDuration = 3600
+        case .week:
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "ru_RU")
+            formatter.dateFormat = "EE"
+            label = slot < slotDates.count ? formatter.string(from: slotDates[slot]) : ""
+            slotData = slot < slotDates.count ? (dailyData[slotDates[slot]] ?? []) : []
+            maxDuration = 86400
+        case .month:
+            let cal = Calendar.current
+            label = slot < slotDates.count ? "\(cal.component(.day, from: slotDates[slot]))" : ""
+            slotData = slot < slotDates.count ? (dailyData[slotDates[slot]] ?? []) : []
+            maxDuration = 86400
         }
 
-        tableView.reloadData()
+        let totalActive = slotData.reduce(0.0) { $0 + $1.duration }
+        let fillFraction = totalActive > 0 ? min(totalActive / maxDuration, 1.0) : 0
+
+        let segments: [(color: NSColor, fraction: CGFloat)] = slotData.map { entry in
+            let color: NSColor
+            if let tagId = entry.tagId, let tag = tagCache[tagId] {
+                color = NSColor(hex: isDark ? tag.colorDark : tag.colorLight)
+            } else {
+                color = .systemGray
+            }
+            let fraction = totalActive > 0 ? CGFloat(fillFraction * (entry.duration / totalActive)) : 0
+            return (color, fraction)
+        }
+
+        cell.configure(label: label, segments: segments)
+        cell.isHighlighted = (selectedSlot == slot)
+        cell.onTap = { [weak self] in
+            guard let self else { return }
+            if self.selectedSlot == slot {
+                self.selectedSlot = nil
+            } else {
+                self.selectedSlot = slot
+            }
+            self.reloadTable()
+            self.timelineCollectionView.reloadData()
+        }
+
+        return cell
+    }
+
+    // MARK: - NSCollectionViewDelegateFlowLayout
+
+    func collectionView(_ collectionView: NSCollectionView, layout collectionViewLayout: NSCollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> NSSize {
+        let count: CGFloat
+        switch timelineMode {
+        case .day: count = 24
+        case .week: count = 7
+        case .month: count = CGFloat(slotDates.count)
+        }
+        let width = max(collectionView.bounds.width / count, 14)
+        return NSSize(width: width, height: collectionView.bounds.height)
     }
 
     // MARK: - NSTableViewDataSource
 
     nonisolated func numberOfRows(in tableView: NSTableView) -> Int {
         MainActor.assumeIsolated {
-            switch mode {
-            case .apps: return logs.count
+            switch tableMode {
+            case .apps: return filteredLogs.count
             case .tags: return tagSummaries.count
             }
         }
@@ -146,13 +482,13 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
     // MARK: - NSTableViewDelegate
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        switch mode {
+        switch tableMode {
         case .apps:
             let id = NSUserInterfaceItemIdentifier("DetailCell")
             let cell = (tableView.makeView(withIdentifier: id, owner: nil) as? DetailCellView)
                 ?? DetailCellView()
             cell.identifier = id
-            let log = logs[row]
+            let log = filteredLogs[row]
             let appInfo = appCache[log.appId]
             let resolvedTag = resolveTag(log: log, appInfo: appInfo)
             cell.configure(log: log, appInfo: appInfo, tag: resolvedTag)
@@ -169,11 +505,24 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
     }
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
-        guard mode == .apps else { return false }
-        let log = logs[row]
+        guard tableMode == .apps else { return false }
+        let log = filteredLogs[row]
         guard !log.isIdle else { return false }
         showSessionTagMenu(forLog: log, at: row)
         return false
+    }
+
+    // MARK: - Theme support
+
+    private var appearanceObservation: NSKeyValueObservation?
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        if appearanceObservation == nil {
+            appearanceObservation = view.observe(\.effectiveAppearance) { [weak self] _, _ in
+                self?.timelineCollectionView.reloadData()
+            }
+        }
     }
 
     // MARK: - Tag resolution
@@ -203,15 +552,15 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
 
         let isOverridden = log.tagId != nil
 
-        // "App tag" item — reset to app default
-        let appTagItem = NSMenuItem(title: "Тег приложения", action: #selector(sessionTagMenuClicked(_:)), keyEquivalent: "")
+        // "App tag" item -- reset to app default
+        let appTagItem = NSMenuItem(title: "\u{0422}\u{0435}\u{0433} \u{043F}\u{0440}\u{0438}\u{043B}\u{043E}\u{0436}\u{0435}\u{043D}\u{0438}\u{044F}", action: #selector(sessionTagMenuClicked(_:)), keyEquivalent: "")
         appTagItem.target = self
         appTagItem.representedObject = ["logId": log.id, "action": "reset"] as NSDictionary
         if !isOverridden { appTagItem.state = .on }
         menu.addItem(appTagItem)
 
-        // "No tag" — explicitly remove
-        let noTagItem = NSMenuItem(title: "Без тега", action: #selector(sessionTagMenuClicked(_:)), keyEquivalent: "")
+        // "No tag" -- explicitly remove
+        let noTagItem = NSMenuItem(title: "\u{0411}\u{0435}\u{0437} \u{0442}\u{0435}\u{0433}\u{0430}", action: #selector(sessionTagMenuClicked(_:)), keyEquivalent: "")
         noTagItem.target = self
         noTagItem.representedObject = ["logId": log.id, "action": "none"] as NSDictionary
         menu.addItem(noTagItem)
@@ -228,7 +577,7 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
 
             let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             let color = NSColor(hex: isDark ? tag.colorDark : tag.colorLight)
-            let dot = NSAttributedString(string: "● ", attributes: [.foregroundColor: color, .font: NSFont.systemFont(ofSize: 13)])
+            let dot = NSAttributedString(string: "\u{25CF} ", attributes: [.foregroundColor: color, .font: NSFont.systemFont(ofSize: 13)])
             let name = NSAttributedString(string: tag.name, attributes: [.font: NSFont.systemFont(ofSize: 13)])
             let title = NSMutableAttributedString()
             title.append(dot)
@@ -240,7 +589,7 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
 
         menu.addItem(.separator())
 
-        let createItem = NSMenuItem(title: "Создать тег...", action: #selector(createTagFromDetail(_:)), keyEquivalent: "")
+        let createItem = NSMenuItem(title: "\u{0421}\u{043E}\u{0437}\u{0434}\u{0430}\u{0442}\u{044C} \u{0442}\u{0435}\u{0433}...", action: #selector(createTagFromDetail(_:)), keyEquivalent: "")
         createItem.target = self
         menu.addItem(createItem)
 
@@ -254,7 +603,7 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
 
         do {
             if let _ = dict["action"] as? String {
-                // "reset" or "none" — both set tagId to nil
+                // "reset" or "none" -- both set tagId to nil
                 try db.setSessionTag(logId: logId, tagId: nil)
             } else if let tagId = dict["tagId"] as? Int64 {
                 try db.setSessionTag(logId: logId, tagId: tagId)
@@ -267,17 +616,17 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
 
     @objc private func createTagFromDetail(_ sender: NSMenuItem) {
         let alert = NSAlert()
-        alert.messageText = "Создать тег"
-        alert.addButton(withTitle: "Создать")
-        alert.addButton(withTitle: "Отмена")
+        alert.messageText = "\u{0421}\u{043E}\u{0437}\u{0434}\u{0430}\u{0442}\u{044C} \u{0442}\u{0435}\u{0433}"
+        alert.addButton(withTitle: "\u{0421}\u{043E}\u{0437}\u{0434}\u{0430}\u{0442}\u{044C}")
+        alert.addButton(withTitle: "\u{041E}\u{0442}\u{043C}\u{0435}\u{043D}\u{0430}")
 
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 100))
 
         let nameField = NSTextField(frame: NSRect(x: 0, y: 70, width: 300, height: 24))
-        nameField.placeholderString = "Название тега"
+        nameField.placeholderString = "\u{041D}\u{0430}\u{0437}\u{0432}\u{0430}\u{043D}\u{0438}\u{0435} \u{0442}\u{0435}\u{0433}\u{0430}"
         container.addSubview(nameField)
 
-        let lightLabel = NSTextField(labelWithString: "Светлая:")
+        let lightLabel = NSTextField(labelWithString: "\u{0421}\u{0432}\u{0435}\u{0442}\u{043B}\u{0430}\u{044F}:")
         lightLabel.frame = NSRect(x: 0, y: 35, width: 60, height: 20)
         container.addSubview(lightLabel)
 
@@ -285,7 +634,7 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
         lightColorWell.color = .systemGreen
         container.addSubview(lightColorWell)
 
-        let darkLabel = NSTextField(labelWithString: "Тёмная:")
+        let darkLabel = NSTextField(labelWithString: "\u{0422}\u{0451}\u{043C}\u{043D}\u{0430}\u{044F}:")
         darkLabel.frame = NSRect(x: 150, y: 35, width: 60, height: 20)
         container.addSubview(darkLabel)
 
@@ -306,8 +655,8 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
             reload()
         } catch {
             let errorAlert = NSAlert()
-            errorAlert.messageText = "Ошибка"
-            errorAlert.informativeText = "Тег с таким именем уже существует."
+            errorAlert.messageText = "\u{041E}\u{0448}\u{0438}\u{0431}\u{043A}\u{0430}"
+            errorAlert.informativeText = "\u{0422}\u{0435}\u{0433} \u{0441} \u{0442}\u{0430}\u{043A}\u{0438}\u{043C} \u{0438}\u{043C}\u{0435}\u{043D}\u{0435}\u{043C} \u{0443}\u{0436}\u{0435} \u{0441}\u{0443}\u{0449}\u{0435}\u{0441}\u{0442}\u{0432}\u{0443}\u{0435}\u{0442}."
             errorAlert.runModal()
         }
     }
