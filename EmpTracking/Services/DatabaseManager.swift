@@ -2,6 +2,11 @@ import Foundation
 import SQLite3
 import Cocoa
 
+struct TagSlotDuration {
+    let tagId: Int64?
+    let duration: TimeInterval
+}
+
 nonisolated final class DatabaseManager: @unchecked Sendable {
     private var db: OpaquePointer?
     private let path: String
@@ -406,6 +411,42 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
             summaries.append(TagSummary(tag: tag, totalDuration: totalDuration))
         }
         return summaries
+    }
+
+    func fetchHourlyTagSummaries(for date: Date) throws -> [Int: [TagSlotDuration]] {
+        let cal = Calendar.current
+        let startOfDay = cal.startOfDay(for: date)
+        let endOfDay = startOfDay.addingTimeInterval(86400)
+
+        let sql = """
+            SELECT CAST(strftime('%H', l.start_time, 'unixepoch', 'localtime') AS INTEGER) as hour,
+                   COALESCE(l.tag_id, a.default_tag_id) as resolved_tag_id,
+                   SUM(l.end_time - l.start_time) as total_duration
+            FROM activity_logs l
+            JOIN apps a ON a.id = l.app_id
+            WHERE l.start_time >= ? AND l.start_time < ? AND l.is_idle = 0
+            GROUP BY hour, resolved_tag_id
+            ORDER BY hour, total_duration DESC
+        """
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        sqlite3_bind_double(stmt, 1, startOfDay.timeIntervalSince1970)
+        sqlite3_bind_double(stmt, 2, endOfDay.timeIntervalSince1970)
+
+        var result: [Int: [TagSlotDuration]] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let hour = Int(sqlite3_column_int(stmt, 0))
+            let tagId: Int64? = sqlite3_column_type(stmt, 1) != SQLITE_NULL
+                ? sqlite3_column_int64(stmt, 1) : nil
+            let duration = sqlite3_column_double(stmt, 2)
+            result[hour, default: []].append(TagSlotDuration(tagId: tagId, duration: duration))
+        }
+        return result
     }
 
     private func logFromStatement(_ stmt: OpaquePointer) -> ActivityLog {
