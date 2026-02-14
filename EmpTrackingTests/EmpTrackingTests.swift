@@ -254,6 +254,25 @@ struct DatabaseManagerTests {
         #expect(Int(todaySlots[0].duration) == 1800)
     }
 
+    @Test func fetchesLogsInRange() throws {
+        let db = try makeTestDB()
+        let appId = try db.insertOrGetApp(bundleId: "com.test.app", appName: "TestApp", iconPNG: nil)
+
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let yesterday = today.addingTimeInterval(-86400)
+
+        _ = try db.insertActivityLog(appId: appId, windowTitle: "Yesterday", startTime: yesterday.addingTimeInterval(3600), endTime: yesterday.addingTimeInterval(7200), isIdle: false)
+        _ = try db.insertActivityLog(appId: appId, windowTitle: "Today", startTime: today.addingTimeInterval(3600), endTime: today.addingTimeInterval(7200), isIdle: false)
+
+        let logs = try db.fetchLogs(from: yesterday, to: today)
+        #expect(logs.count == 1)
+        #expect(logs[0].windowTitle == "Yesterday")
+
+        let allLogs = try db.fetchLogs(from: yesterday, to: today.addingTimeInterval(86400))
+        #expect(allLogs.count == 2)
+    }
+
     private func makeTestDB() throws -> DatabaseManager {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)

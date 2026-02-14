@@ -183,6 +183,25 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
         return logs
     }
 
+    func fetchLogs(from: Date, to: Date) throws -> [ActivityLog] {
+        let sql = "SELECT id, app_id, window_title, start_time, end_time, is_idle, tag_id FROM activity_logs WHERE start_time >= ? AND start_time < ? ORDER BY start_time DESC"
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        sqlite3_bind_double(stmt, 1, from.timeIntervalSince1970)
+        sqlite3_bind_double(stmt, 2, to.timeIntervalSince1970)
+
+        var logs: [ActivityLog] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            logs.append(logFromStatement(stmt!))
+        }
+        return logs
+    }
+
     func fetchAppSummaries(since: Date) throws -> [AppSummary] {
         let sql = """
             SELECT a.id, a.app_name, a.bundle_id, a.icon,
