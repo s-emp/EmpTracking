@@ -135,6 +135,7 @@
 			);
 			name = EmpTrackingTests;
 			packageProductDependencies = (
+				C544A7022F3CDFC900241B21 /* SnapshotTesting */,
 			);
 			productName = EmpTrackingTests;
 			productReference = 9544A6A42F3CDFC900241B21 /* EmpTrackingTests.xctest */;
@@ -196,6 +197,9 @@
 			mainGroup = 9544A68B2F3CDFC800241B21;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
+			packageReferences = (
+				C544A7012F3CDFC900241B21 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */,
+			);
 			productRefGroup = 9544A6952F3CDFC800241B21 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -575,6 +579,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		C544A7012F3CDFC900241B21 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/pointfreeco/swift-snapshot-testing";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.17.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		C544A7022F3CDFC900241B21 /* SnapshotTesting */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C544A7012F3CDFC900241B21 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */;
+			productName = SnapshotTesting;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 9544A68C2F3CDFC800241B21 /* Project object */;
 }

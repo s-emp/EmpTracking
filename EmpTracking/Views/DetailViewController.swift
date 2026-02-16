@@ -36,6 +36,8 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
     private let nextButton = NSButton()
     private let calendarButton = NSButton()
     private let timelineModeControl = NSSegmentedControl()
+    private let timelineHeaderLabel = NSTextField(labelWithString: "")
+    private let timelineBackgroundView = NSView()
     private let timelineCollectionView = NSCollectionView()
     private let timelineScrollView = NSScrollView()
     private let tableModeControl = NSSegmentedControl()
@@ -97,6 +99,25 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
         timelineModeControl.action = #selector(timelineModeChanged(_:))
         timelineModeControl.segmentStyle = .rounded
         container.addSubview(timelineModeControl)
+
+        // Timeline header
+        timelineHeaderLabel.translatesAutoresizingMaskIntoConstraints = false
+        timelineHeaderLabel.attributedStringValue = NSAttributedString(
+            string: "TIMELINE",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .kern: 1.5,
+            ]
+        )
+        container.addSubview(timelineHeaderLabel)
+
+        // Timeline background
+        timelineBackgroundView.translatesAutoresizingMaskIntoConstraints = false
+        timelineBackgroundView.wantsLayer = true
+        timelineBackgroundView.layer?.cornerRadius = 8
+        updateTimelineBackgroundColor()
+        container.addSubview(timelineBackgroundView)
 
         // Timeline collection
         let flowLayout = NSCollectionViewFlowLayout()
@@ -169,12 +190,21 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
             timelineModeControl.leadingAnchor.constraint(equalTo: nextButton.trailingAnchor, constant: 12),
             timelineModeControl.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
 
-            timelineScrollView.topAnchor.constraint(equalTo: dateLabel.bottomAnchor, constant: 8),
-            timelineScrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
-            timelineScrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            timelineHeaderLabel.topAnchor.constraint(equalTo: dateLabel.bottomAnchor, constant: 12),
+            timelineHeaderLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+
+            timelineBackgroundView.topAnchor.constraint(equalTo: timelineHeaderLabel.bottomAnchor, constant: 4),
+            timelineBackgroundView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            timelineBackgroundView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+
+            timelineScrollView.topAnchor.constraint(equalTo: timelineBackgroundView.topAnchor, constant: 4),
+            timelineScrollView.leadingAnchor.constraint(equalTo: timelineBackgroundView.leadingAnchor, constant: 4),
+            timelineScrollView.trailingAnchor.constraint(equalTo: timelineBackgroundView.trailingAnchor, constant: -4),
             timelineScrollView.heightAnchor.constraint(equalToConstant: timelineHeight),
 
-            tableModeControl.topAnchor.constraint(equalTo: timelineScrollView.bottomAnchor, constant: 8),
+            timelineBackgroundView.bottomAnchor.constraint(equalTo: timelineScrollView.bottomAnchor, constant: 4),
+
+            tableModeControl.topAnchor.constraint(equalTo: timelineBackgroundView.bottomAnchor, constant: 8),
             tableModeControl.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
 
             totalLabel.centerYAnchor.constraint(equalTo: tableModeControl.centerYAnchor),
@@ -449,6 +479,15 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
 
         cell.configure(label: label, segments: segments)
         cell.isHighlighted = (selectedSlot == slot)
+
+        let totalItems: Int
+        switch timelineMode {
+        case .day: totalItems = 24
+        case .week: totalItems = 7
+        case .month: totalItems = slotDates.count
+        }
+        cell.showSeparator = slot < totalItems - 1
+
         cell.onTap = { [weak self] in
             guard let self else { return }
             if self.selectedSlot == slot {
@@ -529,8 +568,16 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
         if appearanceObservation == nil {
             appearanceObservation = view.observe(\.effectiveAppearance) { [weak self] _, _ in
                 self?.timelineCollectionView.reloadData()
+                self?.updateTimelineBackgroundColor()
             }
         }
+    }
+
+    private func updateTimelineBackgroundColor() {
+        let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        timelineBackgroundView.layer?.backgroundColor = isDark
+            ? NSColor(white: 0.15, alpha: 1.0).cgColor
+            : NSColor(white: 0.95, alpha: 1.0).cgColor
     }
 
     // MARK: - Tag resolution

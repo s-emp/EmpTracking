@@ -3,6 +3,7 @@ import Cocoa
 final class TimelineCell: NSCollectionViewItem {
     let barView = HourBarView()
     let labelButton = NSButton()
+    private let separatorView = NSView()
 
     private var trackingArea: NSTrackingArea?
 
@@ -13,6 +14,9 @@ final class TimelineCell: NSCollectionViewItem {
             barView.layer?.borderColor = NSColor.controlAccentColor.cgColor
         }
     }
+    var showSeparator: Bool = true {
+        didSet { separatorView.isHidden = !showSeparator }
+    }
 
     override func loadView() {
         let container = NSView()
@@ -20,8 +24,12 @@ final class TimelineCell: NSCollectionViewItem {
 
         barView.translatesAutoresizingMaskIntoConstraints = false
         barView.wantsLayer = true
-        barView.layer?.cornerRadius = 3
         container.addSubview(barView)
+
+        separatorView.translatesAutoresizingMaskIntoConstraints = false
+        separatorView.wantsLayer = true
+        separatorView.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        container.addSubview(separatorView)
 
         labelButton.translatesAutoresizingMaskIntoConstraints = false
         labelButton.isBordered = false
@@ -35,6 +43,11 @@ final class TimelineCell: NSCollectionViewItem {
             barView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 1),
             barView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -1),
             barView.bottomAnchor.constraint(equalTo: labelButton.topAnchor, constant: -4),
+
+            separatorView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            separatorView.topAnchor.constraint(equalTo: container.topAnchor),
+            separatorView.bottomAnchor.constraint(equalTo: labelButton.topAnchor, constant: -4),
+            separatorView.widthAnchor.constraint(equalToConstant: 0.5),
 
             labelButton.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             labelButton.trailingAnchor.constraint(equalTo: container.trailingAnchor),
@@ -82,5 +95,6 @@ final class TimelineCell: NSCollectionViewItem {
     func configure(label: String, segments: [(color: NSColor, fraction: CGFloat)]) {
         labelButton.title = label
         barView.segments = segments
+        separatorView.layer?.backgroundColor = NSColor.separatorColor.cgColor
     }
 }
