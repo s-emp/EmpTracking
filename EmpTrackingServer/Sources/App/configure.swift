@@ -13,6 +13,9 @@ func configure(_ app: Application) async throws {
     app.http.server.configuration.hostname = "0.0.0.0"
     app.http.server.configuration.port = 8080
 
+    // Allow large sync payloads (up to 10MB)
+    app.routes.defaultMaxBodySize = "10mb"
+
     app.migrations.add(CreateTables())
     try await app.autoMigrate()
 
