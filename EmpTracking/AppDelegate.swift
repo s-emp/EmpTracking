@@ -7,6 +7,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var popover: NSPopover!
     private var db: DatabaseManager!
     private var tracker: ActivityTracker!
+    private var syncManager: SyncManager?
     private var timelineVC: TimelineViewController!
     private var detailWindow: NSWindow?
 
@@ -21,11 +22,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupDatabase()
         setupMenubar()
         setupTracker()
+        setupSync()
         registerAutoLaunch()
     }
 
     func applicationWillTerminate(_ aNotification: Notification) {
         tracker?.stop()
+        syncManager?.stop()
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
@@ -75,6 +78,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         tracker.start()
     }
 
+    private func setupSync() {
+        do {
+            syncManager = try SyncManager(db: db)
+            syncManager?.onSyncCompleted = { [weak self] in
+                if self?.popover.isShown == true {
+                    self?.timelineVC.reload()
+                }
+            }
+            syncManager?.start()
+        } catch {
+            print("Failed to start sync: \(error)")
+        }
+    }
+
     private func registerAutoLaunch() {
         do {
             try SMAppService.mainApp.register()
@@ -102,7 +119,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let detailVC = DetailViewController(db: db)
+        let deviceId = (try? db.getOrCreateDeviceId()) ?? ""
+        let detailVC = DetailViewController(db: db, deviceId: deviceId)
         let window = NSWindow(contentViewController: detailVC)
         window.title = "Подробнее"
         window.setContentSize(NSSize(width: 500, height: 600))

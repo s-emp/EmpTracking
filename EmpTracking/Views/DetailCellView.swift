@@ -103,6 +103,38 @@ final class DetailCellView: NSTableCellView {
 
         let start = timeFmt.string(from: log.startTime)
         let end = timeFmt.string(from: log.endTime)
-        timeLabel.stringValue = "\(start) – \(end) (\(minutes)мин)"
+        timeLabel.stringValue = "\(start) \u{2013} \(end) (\(minutes)\u{043C}\u{0438}\u{043D})"
+    }
+
+    func configure(remoteLog log: RemoteLog) {
+        let timeFmt = DateFormatter()
+        timeFmt.dateFormat = "HH:mm"
+
+        let duration = log.endTime.timeIntervalSince(log.startTime)
+        let minutes = max(1, Int(duration) / 60)
+
+        if log.isIdle {
+            titleLabel.stringValue = "Idle (\(log.deviceName))"
+            titleLabel.textColor = .tertiaryLabelColor
+            iconView.image = NSImage(systemSymbolName: "moon.zzz", accessibilityDescription: "Idle")
+            iconView.contentTintColor = .tertiaryLabelColor
+            colorDot.isHidden = true
+        } else {
+            let appName = log.appName
+            if let windowTitle = log.windowTitle, !windowTitle.isEmpty {
+                titleLabel.stringValue = "\(appName) \u{2014} \(windowTitle)"
+            } else {
+                titleLabel.stringValue = appName
+            }
+            titleLabel.textColor = .labelColor
+            iconView.image = NSImage(systemSymbolName: "desktopcomputer", accessibilityDescription: "Remote")
+            iconView.contentTintColor = .secondaryLabelColor
+            colorDot.isHidden = true
+            colorDot.layer?.borderWidth = 0
+        }
+
+        let start = timeFmt.string(from: log.startTime)
+        let end = timeFmt.string(from: log.endTime)
+        timeLabel.stringValue = "\(log.deviceName) \u{00B7} \(start) \u{2013} \(end) (\(minutes)\u{043C}\u{0438}\u{043D})"
     }
 }

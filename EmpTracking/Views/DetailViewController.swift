@@ -2,17 +2,51 @@ import Cocoa
 
 final class DetailViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSCollectionViewDataSource, NSCollectionViewDelegateFlowLayout {
     private let db: DatabaseManager
+    private let deviceId: String
     private var logs: [ActivityLog] = []
     private var filteredLogs: [ActivityLog] = []
+    private var remoteLogs: [RemoteLog] = []
+    private var filteredRemoteLogs: [RemoteLog] = []
     private var tagSummaries: [TagSummary] = []
     private var appCache: [Int64: AppInfo] = [:]
     private var tagCache: [Int64: Tag] = [:]
+
+    /// Unified row for the table when mixing local and remote logs.
+    private enum TableRow {
+        case local(ActivityLog)
+        case remote(RemoteLog)
+
+        var startTime: Date {
+            switch self {
+            case .local(let log): return log.startTime
+            case .remote(let log): return log.startTime
+            }
+        }
+
+        var isIdle: Bool {
+            switch self {
+            case .local(let log): return log.isIdle
+            case .remote(let log): return log.isIdle
+            }
+        }
+
+        var duration: TimeInterval {
+            switch self {
+            case .local(let log): return log.endTime.timeIntervalSince(log.startTime)
+            case .remote(let log): return log.endTime.timeIntervalSince(log.startTime)
+            }
+        }
+    }
+    private var mergedRows: [TableRow] = []
 
     private enum TableMode: Int { case apps = 0, tags = 1 }
     private var tableMode: TableMode = .apps
 
     private enum TimelineMode: Int { case day = 0, week = 1, month = 2 }
     private var timelineMode: TimelineMode = .day
+
+    private enum DeviceFilter: Int { case all = 0, thisMac = 1, others = 2 }
+    private var deviceFilter: DeviceFilter = .thisMac
 
     private var anchorDate = Date()
     private var selectedSlot: Int? = nil
@@ -40,14 +74,16 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
     private let timelineBackgroundView = NSView()
     private let timelineCollectionView = NSCollectionView()
     private let timelineScrollView = NSScrollView()
+    private let deviceFilterControl = NSSegmentedControl()
     private let tableModeControl = NSSegmentedControl()
     private let totalLabel = NSTextField(labelWithString: "")
     private let scrollView = NSScrollView()
     private let tableView = NSTableView()
     private var calendarPopover: NSPopover?
 
-    init(db: DatabaseManager) {
+    init(db: DatabaseManager, deviceId: String = "") {
         self.db = db
+        self.deviceId = deviceId
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -138,6 +174,18 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
         timelineScrollView.drawsBackground = false
         container.addSubview(timelineScrollView)
 
+        // Device filter control
+        deviceFilterControl.translatesAutoresizingMaskIntoConstraints = false
+        deviceFilterControl.segmentCount = 3
+        deviceFilterControl.setLabel("\u{0412}\u{0441}\u{0435}", forSegment: 0)
+        deviceFilterControl.setLabel("\u{042D}\u{0442}\u{043E}\u{0442} Mac", forSegment: 1)
+        deviceFilterControl.setLabel("\u{0414}\u{0440}\u{0443}\u{0433}\u{0438}\u{0435}", forSegment: 2)
+        deviceFilterControl.selectedSegment = 1
+        deviceFilterControl.target = self
+        deviceFilterControl.action = #selector(deviceFilterChanged(_:))
+        deviceFilterControl.segmentStyle = .rounded
+        container.addSubview(deviceFilterControl)
+
         // Table mode controls
         tableModeControl.translatesAutoresizingMaskIntoConstraints = false
         tableModeControl.segmentCount = 2
@@ -204,7 +252,10 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
 
             timelineBackgroundView.bottomAnchor.constraint(equalTo: timelineScrollView.bottomAnchor, constant: 4),
 
-            tableModeControl.topAnchor.constraint(equalTo: timelineBackgroundView.bottomAnchor, constant: 8),
+            deviceFilterControl.topAnchor.constraint(equalTo: timelineBackgroundView.bottomAnchor, constant: 8),
+            deviceFilterControl.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+
+            tableModeControl.topAnchor.constraint(equalTo: deviceFilterControl.bottomAnchor, constant: 8),
             tableModeControl.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
 
             totalLabel.centerYAnchor.constraint(equalTo: tableModeControl.centerYAnchor),
@@ -285,6 +336,11 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
         reloadTable()
     }
 
+    @objc private func deviceFilterChanged(_ sender: NSSegmentedControl) {
+        deviceFilter = DeviceFilter(rawValue: sender.selectedSegment) ?? .thisMac
+        reloadTable()
+    }
+
     // MARK: - Data Loading
 
     func reload() {
@@ -348,11 +404,25 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
         do {
             switch tableMode {
             case .apps:
-                logs = try db.fetchLogs(from: rangeStart, to: rangeEnd)
-                for log in logs where appCache[log.appId] == nil {
-                    appCache[log.appId] = try db.fetchAppInfo(appId: log.appId)
+                // Load local logs when filter is .all or .thisMac
+                if deviceFilter == .all || deviceFilter == .thisMac {
+                    logs = try db.fetchLogs(from: rangeStart, to: rangeEnd)
+                    for log in logs where appCache[log.appId] == nil {
+                        appCache[log.appId] = try db.fetchAppInfo(appId: log.appId)
+                    }
+                } else {
+                    logs = []
                 }
+
+                // Load remote logs when filter is .all or .others
+                if deviceFilter == .all || deviceFilter == .others {
+                    remoteLogs = try db.fetchRemoteLogs(from: rangeStart, to: rangeEnd)
+                } else {
+                    remoteLogs = []
+                }
+
                 applySlotFilter()
+                buildMergedRows()
             case .tags:
                 tagSummaries = try db.fetchTagSummaries(from: rangeStart, to: rangeEnd)
             }
@@ -364,18 +434,33 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
     private func applySlotFilter() {
         guard let slot = selectedSlot else {
             filteredLogs = logs
+            filteredRemoteLogs = remoteLogs
             return
         }
         let cal = Calendar.current
         switch timelineMode {
         case .day:
             filteredLogs = logs.filter { cal.component(.hour, from: $0.startTime) == slot }
+            filteredRemoteLogs = remoteLogs.filter { cal.component(.hour, from: $0.startTime) == slot }
         case .week, .month:
-            guard slot < slotDates.count else { filteredLogs = logs; return }
+            guard slot < slotDates.count else {
+                filteredLogs = logs
+                filteredRemoteLogs = remoteLogs
+                return
+            }
             let dayStart = slotDates[slot]
             let dayEnd = dayStart.addingTimeInterval(86400)
             filteredLogs = logs.filter { $0.startTime >= dayStart && $0.startTime < dayEnd }
+            filteredRemoteLogs = remoteLogs.filter { $0.startTime >= dayStart && $0.startTime < dayEnd }
         }
+    }
+
+    private func buildMergedRows() {
+        var rows: [TableRow] = []
+        rows.append(contentsOf: filteredLogs.map { .local($0) })
+        rows.append(contentsOf: filteredRemoteLogs.map { .remote($0) })
+        rows.sort { $0.startTime > $1.startTime }
+        mergedRows = rows
     }
 
     private func reloadTable() {
@@ -383,7 +468,7 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
         let active: TimeInterval
         switch tableMode {
         case .apps:
-            active = filteredLogs.filter { !$0.isIdle }.reduce(0.0) { $0 + $1.endTime.timeIntervalSince($1.startTime) }
+            active = mergedRows.filter { !$0.isIdle }.reduce(0.0) { $0 + $1.duration }
         case .tags:
             active = tagSummaries.reduce(0.0) { $0 + $1.totalDuration }
         }
@@ -520,7 +605,7 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
     nonisolated func numberOfRows(in tableView: NSTableView) -> Int {
         MainActor.assumeIsolated {
             switch tableMode {
-            case .apps: return filteredLogs.count
+            case .apps: return mergedRows.count
             case .tags: return tagSummaries.count
             }
         }
@@ -535,10 +620,16 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
             let cell = (tableView.makeView(withIdentifier: id, owner: nil) as? DetailCellView)
                 ?? DetailCellView()
             cell.identifier = id
-            let log = filteredLogs[row]
-            let appInfo = appCache[log.appId]
-            let resolvedTag = resolveTag(log: log, appInfo: appInfo)
-            cell.configure(log: log, appInfo: appInfo, tag: resolvedTag)
+
+            let tableRow = mergedRows[row]
+            switch tableRow {
+            case .local(let log):
+                let appInfo = appCache[log.appId]
+                let resolvedTag = resolveTag(log: log, appInfo: appInfo)
+                cell.configure(log: log, appInfo: appInfo, tag: resolvedTag)
+            case .remote(let log):
+                cell.configure(remoteLog: log)
+            }
             return cell
 
         case .tags:
@@ -553,8 +644,8 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
         guard tableMode == .apps else { return false }
-        let log = filteredLogs[row]
-        guard !log.isIdle else { return false }
+        let tableRow = mergedRows[row]
+        guard case .local(let log) = tableRow, !log.isIdle else { return false }
         showSessionTagMenu(forLog: log, at: row)
         return false
     }
