@@ -84,6 +84,36 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
             try execute("UPDATE apps SET icon = NULL")
             try execute("VACUUM")
         }
+
+        // Migration: settings table for sync configuration
+        try execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
+
+        // Migration: add synced column for sync tracking
+        let logsColumns2 = try fetchColumnNames(table: "activity_logs")
+        if !logsColumns2.contains("synced") {
+            try execute("ALTER TABLE activity_logs ADD COLUMN synced INTEGER DEFAULT 0")
+        }
+
+        // Remote logs table for data from other devices
+        try execute("""
+            CREATE TABLE IF NOT EXISTS remote_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id TEXT NOT NULL,
+                device_name TEXT NOT NULL,
+                app_name TEXT NOT NULL,
+                bundle_id TEXT NOT NULL,
+                window_title TEXT,
+                start_time REAL NOT NULL,
+                end_time REAL NOT NULL,
+                is_idle INTEGER NOT NULL DEFAULT 0,
+                tag_name TEXT
+            )
+        """)
     }
 
     func insertOrGetApp(bundleId: String, appName: String) throws -> Int64 {
@@ -596,6 +626,191 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
             }
         }
         return names
+    }
+
+    // MARK: - Settings
+
+    func saveSetting(key: String, value: String) throws {
+        let sql = "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)"
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        sqlite3_bind_text(stmt, 1, (key as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 2, (value as NSString).utf8String, -1, nil)
+
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            throw DBError.insertFailed(String(cString: sqlite3_errmsg(db)))
+        }
+    }
+
+    func fetchSetting(key: String) throws -> String? {
+        let sql = "SELECT value FROM settings WHERE key = ?"
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        sqlite3_bind_text(stmt, 1, (key as NSString).utf8String, -1, nil)
+
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            return String(cString: sqlite3_column_text(stmt, 0))
+        }
+        return nil
+    }
+
+    func getOrCreateDeviceId() throws -> String {
+        if let existing = try fetchSetting(key: "device_id") {
+            return existing
+        }
+        let uuid = UUID().uuidString
+        try saveSetting(key: "device_id", value: uuid)
+        return uuid
+    }
+
+    // MARK: - Sync
+
+    func fetchUnsyncedLogs(limit: Int) throws -> [(log: ActivityLog, bundleId: String, tagName: String?)] {
+        let sql = """
+            SELECT l.id, l.app_id, l.window_title, l.start_time, l.end_time, l.is_idle, l.tag_id,
+                   a.bundle_id,
+                   t.name as tag_name
+            FROM activity_logs l
+            JOIN apps a ON a.id = l.app_id
+            LEFT JOIN tags t ON t.id = COALESCE(l.tag_id, a.default_tag_id)
+            WHERE l.synced = 0
+            ORDER BY l.id
+            LIMIT ?
+        """
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        sqlite3_bind_int(stmt, 1, Int32(limit))
+
+        var results: [(log: ActivityLog, bundleId: String, tagName: String?)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let log = ActivityLog(
+                id: sqlite3_column_int64(stmt, 0),
+                appId: sqlite3_column_int64(stmt, 1),
+                windowTitle: sqlite3_column_type(stmt, 2) != SQLITE_NULL
+                    ? String(cString: sqlite3_column_text(stmt, 2)) : nil,
+                startTime: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 3)),
+                endTime: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 4)),
+                isIdle: sqlite3_column_int(stmt, 5) != 0,
+                tagId: sqlite3_column_type(stmt, 6) != SQLITE_NULL
+                    ? sqlite3_column_int64(stmt, 6) : nil
+            )
+            let bundleId = String(cString: sqlite3_column_text(stmt, 7))
+            let tagName: String? = sqlite3_column_type(stmt, 8) != SQLITE_NULL
+                ? String(cString: sqlite3_column_text(stmt, 8)) : nil
+            results.append((log: log, bundleId: bundleId, tagName: tagName))
+        }
+        return results
+    }
+
+    func markLogsAsSynced(logIds: [Int64]) throws {
+        guard !logIds.isEmpty else { return }
+        let placeholders = logIds.map { _ in "?" }.joined(separator: ",")
+        let sql = "UPDATE activity_logs SET synced = 1 WHERE id IN (\(placeholders))"
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        for (i, id) in logIds.enumerated() {
+            sqlite3_bind_int64(stmt, Int32(i + 1), id)
+        }
+
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            throw DBError.updateFailed(String(cString: sqlite3_errmsg(db)))
+        }
+    }
+
+    func insertRemoteLog(deviceId: String, deviceName: String, appName: String, bundleId: String,
+                         windowTitle: String?, startTime: Double, endTime: Double,
+                         isIdle: Bool, tagName: String?) throws {
+        let sql = """
+            INSERT INTO remote_logs (device_id, device_name, app_name, bundle_id,
+                                     window_title, start_time, end_time, is_idle, tag_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        sqlite3_bind_text(stmt, 1, (deviceId as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 2, (deviceName as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 3, (appName as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 4, (bundleId as NSString).utf8String, -1, nil)
+        if let title = windowTitle {
+            sqlite3_bind_text(stmt, 5, (title as NSString).utf8String, -1, nil)
+        } else {
+            sqlite3_bind_null(stmt, 5)
+        }
+        sqlite3_bind_double(stmt, 6, startTime)
+        sqlite3_bind_double(stmt, 7, endTime)
+        sqlite3_bind_int(stmt, 8, isIdle ? 1 : 0)
+        if let tagName = tagName {
+            sqlite3_bind_text(stmt, 9, (tagName as NSString).utf8String, -1, nil)
+        } else {
+            sqlite3_bind_null(stmt, 9)
+        }
+
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            throw DBError.insertFailed(String(cString: sqlite3_errmsg(db)))
+        }
+    }
+
+    func fetchRemoteLogs(from: Date, to: Date) throws -> [RemoteLog] {
+        let sql = """
+            SELECT id, device_id, device_name, app_name, bundle_id, window_title,
+                   start_time, end_time, is_idle, tag_name
+            FROM remote_logs
+            WHERE start_time >= ? AND start_time < ?
+            ORDER BY start_time DESC
+        """
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        sqlite3_bind_double(stmt, 1, from.timeIntervalSince1970)
+        sqlite3_bind_double(stmt, 2, to.timeIntervalSince1970)
+
+        var logs: [RemoteLog] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            logs.append(RemoteLog(
+                id: sqlite3_column_int64(stmt, 0),
+                deviceId: String(cString: sqlite3_column_text(stmt, 1)),
+                deviceName: String(cString: sqlite3_column_text(stmt, 2)),
+                appName: String(cString: sqlite3_column_text(stmt, 3)),
+                bundleId: String(cString: sqlite3_column_text(stmt, 4)),
+                windowTitle: sqlite3_column_type(stmt, 5) != SQLITE_NULL
+                    ? String(cString: sqlite3_column_text(stmt, 5)) : nil,
+                startTime: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 6)),
+                endTime: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 7)),
+                isIdle: sqlite3_column_int(stmt, 8) != 0,
+                tagName: sqlite3_column_type(stmt, 9) != SQLITE_NULL
+                    ? String(cString: sqlite3_column_text(stmt, 9)) : nil
+            ))
+        }
+        return logs
     }
 
     enum DBError: Error {

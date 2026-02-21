@@ -304,6 +304,34 @@ struct DatabaseManagerTests {
         #expect(infoUpdated?.icon != nil)
     }
 
+    @Test func createsAndRetrievesDeviceId() throws {
+        let db = try makeTestDB()
+        let deviceId = try db.getOrCreateDeviceId()
+        #expect(!deviceId.isEmpty)
+        #expect(UUID(uuidString: deviceId) != nil)
+        let sameId = try db.getOrCreateDeviceId()
+        #expect(sameId == deviceId)
+    }
+
+    @Test func unsyncedLogsDefaultToZero() throws {
+        let db = try makeTestDB()
+        let appId = try db.insertOrGetApp(bundleId: "com.test.app", appName: "TestApp")
+        let now = Date()
+        _ = try db.insertActivityLog(appId: appId, windowTitle: "W", startTime: now, endTime: now, isIdle: false)
+        let unsynced = try db.fetchUnsyncedLogs(limit: 100)
+        #expect(unsynced.count == 1)
+    }
+
+    @Test func markLogsAsSynced() throws {
+        let db = try makeTestDB()
+        let appId = try db.insertOrGetApp(bundleId: "com.test.app", appName: "TestApp")
+        let now = Date()
+        let logId = try db.insertActivityLog(appId: appId, windowTitle: "W", startTime: now, endTime: now, isIdle: false)
+        try db.markLogsAsSynced(logIds: [logId])
+        let unsynced = try db.fetchUnsyncedLogs(limit: 100)
+        #expect(unsynced.isEmpty)
+    }
+
     private func makeTestDB() throws -> DatabaseManager {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
