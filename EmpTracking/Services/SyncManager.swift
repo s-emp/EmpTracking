@@ -87,64 +87,72 @@ final class SyncManager {
     }
 
     private func pushUnsyncedLogs() async throws {
-        let unsynced = try db.fetchUnsyncedLogs(limit: 100)
-        guard !unsynced.isEmpty else { return }
+        var totalPushed = 0
 
-        var appsSet = Set<String>()
-        var apps: [[String: String]] = []
-        var tagsSet = Set<String>()
-        var tags: [[String: String]] = []
-        var logs: [[String: Any]] = []
+        repeat {
+            let unsynced = try db.fetchUnsyncedLogs(limit: 100)
+            guard !unsynced.isEmpty else { break }
 
-        for entry in unsynced {
-            if appsSet.insert(entry.bundleId).inserted {
-                if let appInfo = try db.fetchAppInfo(appId: entry.log.appId) {
-                    apps.append(["bundle_id": entry.bundleId, "app_name": appInfo.appName])
+            var appsSet = Set<String>()
+            var apps: [[String: String]] = []
+            var tagsSet = Set<String>()
+            var tags: [[String: String]] = []
+            var logs: [[String: Any]] = []
+
+            for entry in unsynced {
+                if appsSet.insert(entry.bundleId).inserted {
+                    if let appInfo = try db.fetchAppInfo(appId: entry.log.appId) {
+                        apps.append(["bundle_id": entry.bundleId, "app_name": appInfo.appName])
+                    }
                 }
+
+                if let tagName = entry.tagName, tagsSet.insert(tagName).inserted {
+                    let allTags = try db.fetchAllTags()
+                    if let tag = allTags.first(where: { $0.name == tagName }) {
+                        tags.append([
+                            "name": tag.name,
+                            "color_light": tag.colorLight,
+                            "color_dark": tag.colorDark
+                        ])
+                    }
+                }
+
+                var logDict: [String: Any] = [
+                    "client_log_id": entry.log.id,
+                    "bundle_id": entry.bundleId,
+                    "start_time": entry.log.startTime.timeIntervalSince1970,
+                    "end_time": entry.log.endTime.timeIntervalSince1970,
+                    "is_idle": entry.log.isIdle ? 1 : 0,
+                ]
+                logDict["window_title"] = entry.log.windowTitle
+                logDict["tag_name"] = entry.tagName
+                logs.append(logDict)
             }
 
-            if let tagName = entry.tagName, tagsSet.insert(tagName).inserted {
-                let allTags = try db.fetchAllTags()
-                if let tag = allTags.first(where: { $0.name == tagName }) {
-                    tags.append([
-                        "name": tag.name,
-                        "color_light": tag.colorLight,
-                        "color_dark": tag.colorDark
-                    ])
-                }
-            }
-
-            var logDict: [String: Any] = [
-                "client_log_id": entry.log.id,
-                "bundle_id": entry.bundleId,
-                "start_time": entry.log.startTime.timeIntervalSince1970,
-                "end_time": entry.log.endTime.timeIntervalSince1970,
-                "is_idle": entry.log.isIdle ? 1 : 0,
+            let payload: [String: Any] = [
+                "device_id": deviceId,
+                "apps": apps,
+                "tags": tags,
+                "logs": logs
             ]
-            logDict["window_title"] = entry.log.windowTitle
-            logDict["tag_name"] = entry.tagName
-            logs.append(logDict)
+
+            let url = URL(string: "\(serverBaseUrl)/api/v1/sync/push")!
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+            let (_, response) = try await session.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard status == 200 else { throw SyncError.httpError(status) }
+
+            try db.markLogsAsSynced(logIds: unsynced.map { $0.log.id })
+            totalPushed += unsynced.count
+        } while true
+
+        if totalPushed > 0 {
+            print("[Sync] Pushed \(totalPushed) logs")
         }
-
-        let payload: [String: Any] = [
-            "device_id": deviceId,
-            "apps": apps,
-            "tags": tags,
-            "logs": logs
-        ]
-
-        let url = URL(string: "\(serverBaseUrl)/api/v1/sync/push")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-
-        let (_, response) = try await session.data(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard status == 200 else { throw SyncError.httpError(status) }
-
-        try db.markLogsAsSynced(logIds: unsynced.map { $0.log.id })
-        print("[Sync] Pushed \(unsynced.count) logs")
     }
 
     private func pullRemoteLogs() async throws {
