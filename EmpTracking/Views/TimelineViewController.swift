@@ -14,6 +14,7 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
     private let tableView = NSTableView()
     private let headerLabel = NSTextField(labelWithString: "")
     private let totalLabel = NSTextField(labelWithString: "")
+    private let syncButton = NSButton(title: "Синхронизация", target: nil, action: nil)
 
     init(db: DatabaseManager) {
         self.db = db
@@ -69,6 +70,12 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
         detailButton.font = .systemFont(ofSize: 11)
         container.addSubview(detailButton)
 
+        syncButton.translatesAutoresizingMaskIntoConstraints = false
+        syncButton.bezelStyle = .inline
+        syncButton.font = .systemFont(ofSize: 11)
+        syncButton.isEnabled = false
+        container.addSubview(syncButton)
+
         let quitButton = NSButton(title: "Quit", target: NSApp, action: #selector(NSApplication.terminate(_:)))
         quitButton.translatesAutoresizingMaskIntoConstraints = false
         quitButton.bezelStyle = .inline
@@ -94,6 +101,9 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
             detailButton.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
             detailButton.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
 
+            syncButton.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            syncButton.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
+
             quitButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
             quitButton.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
         ])
@@ -111,6 +121,26 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
 
     @objc private func detailTapped() {
         onDetail?()
+    }
+
+    func updateSyncStatus(_ status: SyncManager.SyncStatus) {
+        switch status {
+        case .synced:
+            syncButton.title = "Синхронизация \u{2713}"
+            syncButton.contentTintColor = .systemGreen
+        case .syncing:
+            syncButton.title = "Синхронизация..."
+            syncButton.contentTintColor = .secondaryLabelColor
+        case .pending(let count):
+            syncButton.title = "Не синхр: \(count)"
+            syncButton.contentTintColor = .systemOrange
+        case .error:
+            syncButton.title = "Синхр. ошибка"
+            syncButton.contentTintColor = .systemRed
+        case .idle:
+            syncButton.title = "Синхронизация"
+            syncButton.contentTintColor = .secondaryLabelColor
+        }
     }
 
     func reload() {

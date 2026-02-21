@@ -8,7 +8,17 @@ final class SyncManager {
     private var timer: Timer?
     private let session: URLSession
 
+    enum SyncStatus {
+        case idle
+        case syncing
+        case synced
+        case pending(Int)
+        case error(String)
+    }
+
     var onSyncCompleted: (() -> Void)?
+    var onStatusChanged: ((SyncStatus) -> Void)?
+    private(set) var syncStatus: SyncStatus = .idle
 
     enum SyncError: Error {
         case serverUnreachable
@@ -43,16 +53,33 @@ final class SyncManager {
         timer = nil
     }
 
+    private func updateStatus(_ status: SyncStatus) {
+        syncStatus = status
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.onStatusChanged?(self.syncStatus)
+        }
+    }
+
     private func performSync() {
         Task {
             do {
-                guard try await isServerReachable() else { return }
+                updateStatus(.syncing)
+                guard try await isServerReachable() else {
+                    let count = (try? db.countUnsyncedLogs()) ?? 0
+                    updateStatus(count > 0 ? .pending(count) : .idle)
+                    return
+                }
                 try await registerDevice()
                 try await pushUnsyncedLogs()
                 try await pullRemoteLogs()
+                let unsyncedCount = (try? db.countUnsyncedLogs()) ?? 0
+                updateStatus(unsyncedCount > 0 ? .pending(unsyncedCount) : .synced)
                 await MainActor.run { onSyncCompleted?() }
             } catch {
                 print("[Sync] Error: \(error)")
+                let count = (try? db.countUnsyncedLogs()) ?? 0
+                updateStatus(count > 0 ? .pending(count) : .error(error.localizedDescription))
             }
         }
     }

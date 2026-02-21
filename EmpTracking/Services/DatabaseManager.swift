@@ -675,6 +675,10 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
 
     // MARK: - Sync
 
+    func countUnsyncedLogs() throws -> Int {
+        return try fetchScalarInt("SELECT COUNT(*) FROM activity_logs WHERE synced = 0")
+    }
+
     func fetchUnsyncedLogs(limit: Int) throws -> [(log: ActivityLog, bundleId: String, tagName: String?)] {
         let sql = """
             SELECT l.id, l.app_id, l.window_title, l.start_time, l.end_time, l.is_idle, l.tag_id,

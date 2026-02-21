@@ -86,6 +86,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.timelineVC.reload()
                 }
             }
+            syncManager?.onStatusChanged = { [weak self] (status: SyncManager.SyncStatus) in
+                self?.timelineVC.updateSyncStatus(status)
+            }
             syncManager?.start()
         } catch {
             print("Failed to start sync: \(error)")
@@ -105,6 +108,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             popover.performClose(nil)
         } else if let button = statusItem.button {
             timelineVC.reload()
+            if let status = syncManager?.syncStatus {
+                timelineVC.updateSyncStatus(status)
+            }
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
     }
