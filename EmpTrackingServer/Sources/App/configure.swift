@@ -3,8 +3,12 @@ import Fluent
 import FluentSQLiteDriver
 
 func configure(_ app: Application) async throws {
-    let dbPath = app.directory.workingDirectory + "emptracking-server.sqlite"
-    app.databases.use(.sqlite(.file(dbPath)), as: .sqlite)
+    if app.environment == .testing {
+        app.databases.use(.sqlite(.memory), as: .sqlite)
+    } else {
+        let dbPath = app.directory.workingDirectory + "emptracking-server.sqlite"
+        app.databases.use(.sqlite(.file(dbPath)), as: .sqlite)
+    }
 
     app.http.server.configuration.hostname = "0.0.0.0"
     app.http.server.configuration.port = 8080
