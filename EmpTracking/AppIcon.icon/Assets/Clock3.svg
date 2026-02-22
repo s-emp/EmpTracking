@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="486px" height="486px" viewBox="0 0 486 486" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>Oval</title>
+    <defs>
+        <linearGradient x1="0%" y1="0%" x2="100%" y2="100%" id="linearGradient-1">
+            <stop stop-color="#04CFF0" offset="0%"></stop>
+            <stop stop-color="#5B5EF4" offset="42%"></stop>
+            <stop stop-color="#C038D0" offset="100%"></stop>
+        </linearGradient>
+    </defs>
+    <g id="Page-1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="time-tracker-icon" transform="translate(-269, -269)" stroke="url(#linearGradient-1)">
+            <g id="Oval" transform="translate(284, 284)" stroke-width="30">
+                <circle cx="228" cy="228" r="228"></circle>
+            </g>
+        </g>
+    </g>
+</svg>

@@ -1,0 +1,70 @@
+{
+  "fill" : {
+    "solid" : "extended-gray:0.00000,1.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "Clock2.svg",
+          "name" : "Clock2",
+          "position" : {
+            "scale" : 2,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "blend-mode-specializations" : [
+            {
+              "value" : "normal"
+            },
+            {
+              "appearance" : "dark",
+              "value" : "darken"
+            }
+          ],
+          "glass" : true,
+          "hidden" : false,
+          "image-name" : "Clock3.svg",
+          "name" : "Clock3",
+          "position" : {
+            "scale" : 2,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "image-name" : "ClockArrow.svg",
+          "name" : "ClockArrow",
+          "position" : {
+            "scale" : 2,
+            "translation-in-points" : [
+              28.4921875,
+              -40.234375
+            ]
+          }
+        }
+      ],
+      "name" : "Circle",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}
