@@ -49,6 +49,18 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
     private enum DeviceFilter: Int { case all = 0, thisMac = 1, others = 2 }
     private var deviceFilter: DeviceFilter = .thisMac
 
+    private enum GanttGranularity: Int {
+        case exact = 0, fiveMin = 1, tenMin = 2
+        var mergeWindow: TimeInterval {
+            switch self {
+            case .exact: return 0
+            case .fiveMin: return 300
+            case .tenMin: return 600
+            }
+        }
+    }
+    private var ganttGranularity: GanttGranularity = .fiveMin
+
     private var anchorDate = Date()
     private var selectedSlot: Int? = nil
 
@@ -81,7 +93,9 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
     private let scrollView = NSScrollView()
     private let tableView = NSTableView()
     private var calendarPopover: NSPopover?
+    private let ganttGranularityControl = NSSegmentedControl()
     private var ganttHostingView: NSView?
+    private var ganttHeightConstraint: NSLayoutConstraint?
     private var ganttEntries: [GanttEntry] = []
 
     init(db: DatabaseManager, deviceId: String = "") {
@@ -151,6 +165,20 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
         )
         container.addSubview(timelineHeaderLabel)
 
+        // Gantt granularity control
+        ganttGranularityControl.translatesAutoresizingMaskIntoConstraints = false
+        ganttGranularityControl.segmentCount = 3
+        ganttGranularityControl.setLabel("Точные", forSegment: 0)
+        ganttGranularityControl.setLabel("5 мин", forSegment: 1)
+        ganttGranularityControl.setLabel("10 мин", forSegment: 2)
+        ganttGranularityControl.selectedSegment = 1
+        ganttGranularityControl.target = self
+        ganttGranularityControl.action = #selector(ganttGranularityChanged(_:))
+        ganttGranularityControl.segmentStyle = .rounded
+        ganttGranularityControl.controlSize = .small
+        ganttGranularityControl.isHidden = true
+        container.addSubview(ganttGranularityControl)
+
         // Timeline background
         timelineBackgroundView.translatesAutoresizingMaskIntoConstraints = false
         timelineBackgroundView.wantsLayer = true
@@ -184,6 +212,9 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
         hostingView.isHidden = true
         container.addSubview(hostingView)
         ganttHostingView = hostingView
+        let heightConstraint = hostingView.heightAnchor.constraint(equalToConstant: 200)
+        heightConstraint.isActive = true
+        ganttHeightConstraint = heightConstraint
 
         // Device filter control
         deviceFilterControl.translatesAutoresizingMaskIntoConstraints = false
@@ -252,6 +283,9 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
             timelineHeaderLabel.topAnchor.constraint(equalTo: dateLabel.bottomAnchor, constant: 12),
             timelineHeaderLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
 
+            ganttGranularityControl.centerYAnchor.constraint(equalTo: timelineHeaderLabel.centerYAnchor),
+            ganttGranularityControl.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+
             timelineBackgroundView.topAnchor.constraint(equalTo: timelineHeaderLabel.bottomAnchor, constant: 4),
             timelineBackgroundView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
             timelineBackgroundView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
@@ -264,9 +298,9 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
             hostingView.topAnchor.constraint(equalTo: timelineBackgroundView.topAnchor, constant: 4),
             hostingView.leadingAnchor.constraint(equalTo: timelineBackgroundView.leadingAnchor, constant: 4),
             hostingView.trailingAnchor.constraint(equalTo: timelineBackgroundView.trailingAnchor, constant: -4),
-            hostingView.heightAnchor.constraint(equalToConstant: timelineHeight),
 
-            timelineBackgroundView.bottomAnchor.constraint(equalTo: timelineScrollView.bottomAnchor, constant: 4),
+            timelineBackgroundView.bottomAnchor.constraint(greaterThanOrEqualTo: timelineScrollView.bottomAnchor, constant: 4),
+            timelineBackgroundView.bottomAnchor.constraint(greaterThanOrEqualTo: hostingView.bottomAnchor, constant: 4),
 
             deviceFilterControl.topAnchor.constraint(equalTo: timelineBackgroundView.bottomAnchor, constant: 8),
             deviceFilterControl.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
@@ -347,6 +381,11 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
         reload()
     }
 
+    @objc private func ganttGranularityChanged(_ sender: NSSegmentedControl) {
+        ganttGranularity = GanttGranularity(rawValue: sender.selectedSegment) ?? .fiveMin
+        updateGanttChart()
+    }
+
     @objc private func tableModeChanged(_ sender: NSSegmentedControl) {
         tableMode = TableMode(rawValue: sender.selectedSegment) ?? .apps
         reloadTable()
@@ -420,6 +459,7 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
     private func updateGanttChart() {
         guard timelineMode == .day else {
             ganttHostingView?.isHidden = true
+            ganttGranularityControl.isHidden = true
             timelineScrollView.isHidden = false
             return
         }
@@ -448,14 +488,59 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
             ))
         }
 
+        // Group entries by merging sessions of the same app within the merge window
+        let mergeWindow = ganttGranularity.mergeWindow
+        if mergeWindow > 0 {
+            entries = mergeGanttEntries(entries, window: mergeWindow)
+        }
+
         ganttEntries = entries
+
+        // Calculate dynamic height: 28px per app row + 40px for axes, min 160, max 400
+        let uniqueApps = Set(entries.map(\.appName)).count
+        let appCount = min(uniqueApps, 15)
+        let dynamicHeight = max(160.0, min(400.0, CGFloat(appCount) * 28.0 + 40.0))
+        ganttHeightConstraint?.constant = dynamicHeight
 
         if let hostingView = ganttHostingView as? NSHostingView<SessionGanttView> {
             hostingView.rootView = SessionGanttView(entries: entries)
         }
 
         ganttHostingView?.isHidden = false
+        ganttGranularityControl.isHidden = false
         timelineScrollView.isHidden = true
+    }
+
+    private func mergeGanttEntries(_ entries: [GanttEntry], window: TimeInterval) -> [GanttEntry] {
+        // Group by app name
+        var byApp: [String: [GanttEntry]] = [:]
+        for entry in entries {
+            byApp[entry.appName, default: []].append(entry)
+        }
+
+        var merged: [GanttEntry] = []
+        for (_, appEntries) in byApp {
+            let sorted = appEntries.sorted { $0.startTime < $1.startTime }
+            guard var current = sorted.first else { continue }
+
+            for next in sorted.dropFirst() {
+                let gap = next.startTime.timeIntervalSince(current.endTime)
+                if gap <= window {
+                    // Merge: extend current to cover next
+                    current = GanttEntry(
+                        appName: current.appName,
+                        startTime: current.startTime,
+                        endTime: max(current.endTime, next.endTime),
+                        colorIndex: current.colorIndex
+                    )
+                } else {
+                    merged.append(current)
+                    current = next
+                }
+            }
+            merged.append(current)
+        }
+        return merged
     }
 
     private func loadTableData() {
