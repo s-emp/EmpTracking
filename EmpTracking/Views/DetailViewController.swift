@@ -1,4 +1,5 @@
 import Cocoa
+import SwiftUI
 
 final class DetailViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSCollectionViewDataSource, NSCollectionViewDelegateFlowLayout {
     private let db: DatabaseManager
@@ -80,6 +81,8 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
     private let scrollView = NSScrollView()
     private let tableView = NSTableView()
     private var calendarPopover: NSPopover?
+    private var ganttHostingView: NSView?
+    private var ganttEntries: [GanttEntry] = []
 
     init(db: DatabaseManager, deviceId: String = "") {
         self.db = db
@@ -174,6 +177,14 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
         timelineScrollView.drawsBackground = false
         container.addSubview(timelineScrollView)
 
+        // Gantt chart (SwiftUI via NSHostingView) — shown in Day mode only
+        let ganttView = SessionGanttView(entries: [])
+        let hostingView = NSHostingView(rootView: ganttView)
+        hostingView.translatesAutoresizingMaskIntoConstraints = false
+        hostingView.isHidden = true
+        container.addSubview(hostingView)
+        ganttHostingView = hostingView
+
         // Device filter control
         deviceFilterControl.translatesAutoresizingMaskIntoConstraints = false
         deviceFilterControl.segmentCount = 3
@@ -249,6 +260,11 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
             timelineScrollView.leadingAnchor.constraint(equalTo: timelineBackgroundView.leadingAnchor, constant: 4),
             timelineScrollView.trailingAnchor.constraint(equalTo: timelineBackgroundView.trailingAnchor, constant: -4),
             timelineScrollView.heightAnchor.constraint(equalToConstant: timelineHeight),
+
+            hostingView.topAnchor.constraint(equalTo: timelineBackgroundView.topAnchor, constant: 4),
+            hostingView.leadingAnchor.constraint(equalTo: timelineBackgroundView.leadingAnchor, constant: 4),
+            hostingView.trailingAnchor.constraint(equalTo: timelineBackgroundView.trailingAnchor, constant: -4),
+            hostingView.heightAnchor.constraint(equalToConstant: timelineHeight),
 
             timelineBackgroundView.bottomAnchor.constraint(equalTo: timelineScrollView.bottomAnchor, constant: 4),
 
@@ -339,6 +355,7 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
     @objc private func deviceFilterChanged(_ sender: NSSegmentedControl) {
         deviceFilter = DeviceFilter(rawValue: sender.selectedSegment) ?? .thisMac
         reloadTable()
+        updateGanttChart()
     }
 
     // MARK: - Data Loading
@@ -348,6 +365,7 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
         loadTimelineData()
         timelineCollectionView.reloadData()
         reloadTable()
+        updateGanttChart()
     }
 
     private func updateDateLabel() {
@@ -397,6 +415,47 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
         } catch {
             print("Error loading timeline data: \(error)")
         }
+    }
+
+    private func updateGanttChart() {
+        guard timelineMode == .day else {
+            ganttHostingView?.isHidden = true
+            timelineScrollView.isHidden = false
+            return
+        }
+
+        var entries: [GanttEntry] = []
+
+        for log in logs where !log.isIdle {
+            let appInfo = appCache[log.appId]
+            let appName = appInfo?.appName ?? "Unknown"
+            let colorIndex = GanttColorPalette.colorIndex(for: appName)
+            entries.append(GanttEntry(
+                appName: appName,
+                startTime: log.startTime,
+                endTime: log.endTime,
+                colorIndex: colorIndex
+            ))
+        }
+
+        for log in remoteLogs where !log.isIdle {
+            let colorIndex = GanttColorPalette.colorIndex(for: log.appName)
+            entries.append(GanttEntry(
+                appName: log.appName,
+                startTime: log.startTime,
+                endTime: log.endTime,
+                colorIndex: colorIndex
+            ))
+        }
+
+        ganttEntries = entries
+
+        if let hostingView = ganttHostingView as? NSHostingView<SessionGanttView> {
+            hostingView.rootView = SessionGanttView(entries: entries)
+        }
+
+        ganttHostingView?.isHidden = false
+        timelineScrollView.isHidden = true
     }
 
     private func loadTableData() {
@@ -660,6 +719,7 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
             appearanceObservation = view.observe(\.effectiveAppearance) { [weak self] _, _ in
                 self?.timelineCollectionView.reloadData()
                 self?.updateTimelineBackgroundColor()
+                self?.updateGanttChart()
             }
         }
     }
