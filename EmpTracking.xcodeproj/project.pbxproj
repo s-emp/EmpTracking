@@ -112,6 +112,7 @@
 			);
 			name = EmpTracking;
 			packageProductDependencies = (
+				E100000000000002AAAAAAAA /* EmpUI_macOS */,
 			);
 			productName = EmpTracking;
 			productReference = 9544A6942F3CDFC800241B21 /* EmpTracking.app */;
@@ -199,6 +200,7 @@
 			preferredProjectObjectVersion = 77;
 			packageReferences = (
 				C544A7012F3CDFC900241B21 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */,
+				E100000000000001AAAAAAAA /* XCRemoteSwiftPackageReference "EmpDesignSystem" */,
 			);
 			productRefGroup = 9544A6952F3CDFC800241B21 /* Products */;
 			projectDirPath = "";
@@ -589,6 +591,14 @@
 				minimumVersion = 1.17.0;
 			};
 		};
+		E100000000000001AAAAAAAA /* XCRemoteSwiftPackageReference "EmpDesignSystem" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/s-emp/EmpDesignSystem";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.1.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -596,6 +606,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = C544A7012F3CDFC900241B21 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */;
 			productName = SnapshotTesting;
+		};
+		E100000000000002AAAAAAAA /* EmpUI_macOS */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E100000000000001AAAAAAAA /* XCRemoteSwiftPackageReference "EmpDesignSystem" */;
+			productName = EmpUI_macOS;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

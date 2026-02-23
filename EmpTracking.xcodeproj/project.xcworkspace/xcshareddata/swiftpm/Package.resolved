@@ -1,6 +1,15 @@
 {
-  "originHash" : "09b08963887ce6eac26952e8acb25256a8ec102f2b5528ae68a97fa296723712",
+  "originHash" : "bf05c61fa9a017b04e5d083c093d3a9fd12a894d3a53d5764bab2f201d141adf",
   "pins" : [
+    {
+      "identity" : "empdesignsystem",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/s-emp/EmpDesignSystem",
+      "state" : {
+        "revision" : "17dbfd1a14815ec388971f4f7613dd59f588bf77",
+        "version" : "0.1.0"
+      }
+    },
     {
       "identity" : "swift-custom-dump",
       "kind" : "remoteSourceControl",

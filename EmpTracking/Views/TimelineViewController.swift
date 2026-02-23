@@ -1,4 +1,5 @@
 import Cocoa
+import EmpUI_macOS
 
 final class TimelineViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     private let db: DatabaseManager
@@ -10,12 +11,6 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
 
     private let dateLabel = EmpText()
     private let totalLabel = EmpText()
-    private let headerSeparator: NSView = {
-        let view = NSView()
-        view.wantsLayer = true
-        view.translatesAutoresizingMaskIntoConstraints = false
-        return view
-    }()
     private let scrollView = NSScrollView()
     private let tableView = NSTableView()
     private let showMoreButton = EmpButton()
@@ -52,10 +47,6 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
         totalLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         container.addSubview(totalLabel)
 
-        // Header separator (1pt line)
-        container.addSubview(headerSeparator)
-        headerSeparator.layer?.backgroundColor = NSColor.Semantic.borderSubtle.cgColor
-
         // Table view
         let column = NSTableColumn(identifier: .init("activity"))
         column.title = ""
@@ -63,7 +54,8 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
         tableView.headerView = nil
         tableView.dataSource = self
         tableView.delegate = self
-        tableView.rowHeight = 72
+        tableView.rowHeight = 44
+        tableView.intercellSpacing = .zero
         tableView.selectionHighlightStyle = .none
         tableView.style = .plain
 
@@ -96,14 +88,8 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
             totalLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -horizontalPadding),
             totalLabel.leadingAnchor.constraint(greaterThanOrEqualTo: dateLabel.trailingAnchor, constant: smallGap),
 
-            // Header separator
-            headerSeparator.topAnchor.constraint(equalTo: dateLabel.bottomAnchor, constant: sectionGap),
-            headerSeparator.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            headerSeparator.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            headerSeparator.heightAnchor.constraint(equalToConstant: 1),
-
-            // Scroll view — below separator, above button
-            scrollView.topAnchor.constraint(equalTo: headerSeparator.bottomAnchor),
+            // Scroll view — below header, above button
+            scrollView.topAnchor.constraint(equalTo: dateLabel.bottomAnchor, constant: sectionGap),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: showMoreButton.topAnchor, constant: -smallGap),

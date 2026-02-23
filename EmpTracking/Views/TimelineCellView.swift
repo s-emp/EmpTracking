@@ -1,24 +1,12 @@
 import Cocoa
+import EmpUI_macOS
 
 final class TimelineCellView: NSTableCellView {
-
-    // MARK: - DS Components
 
     private let iconView = EmpImage()
     private let titleLabel = EmpText()
     private let durationLabel = EmpText()
     private let progressBar = EmpProgressBar()
-
-    // MARK: - Separator
-
-    private let separator: NSView = {
-        let view = NSView()
-        view.wantsLayer = true
-        view.translatesAutoresizingMaskIntoConstraints = false
-        return view
-    }()
-
-    // MARK: - Init
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -30,14 +18,7 @@ final class TimelineCellView: NSTableCellView {
         setupViews()
     }
 
-    // MARK: - Setup
-
     private func setupViews() {
-        let horizontalPadding = EmpSpacing.m.rawValue   // 16
-        let topPadding = EmpSpacing.s.rawValue           // 12
-        let iconTextGap = EmpSpacing.s.rawValue          // 12
-        let rowProgressGap = EmpSpacing.xs.rawValue      // 8
-
         iconView.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         durationLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -47,49 +28,36 @@ final class TimelineCellView: NSTableCellView {
         addSubview(titleLabel)
         addSubview(durationLabel)
         addSubview(progressBar)
-        addSubview(separator)
 
-        // Duration label should not compress; title should truncate instead.
         durationLabel.setContentHuggingPriority(.required, for: .horizontal)
         durationLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         NSLayoutConstraint.activate([
-            // Icon — top-left, 28x28
-            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalPadding),
-            iconView.topAnchor.constraint(equalTo: topAnchor, constant: topPadding),
-            iconView.widthAnchor.constraint(equalToConstant: 28),
-            iconView.heightAnchor.constraint(equalToConstant: 28),
+            // Title — top row
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 8),
+            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: durationLabel.leadingAnchor, constant: -8),
 
-            // Title — to the right of the icon
-            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: iconTextGap),
-            titleLabel.centerYAnchor.constraint(equalTo: iconView.centerYAnchor),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: durationLabel.leadingAnchor, constant: -EmpSpacing.xs.rawValue),
+            // Duration — right-aligned, same line as title
+            durationLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            durationLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
 
-            // Duration — right-aligned
-            durationLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalPadding),
-            durationLabel.centerYAnchor.constraint(equalTo: iconView.centerYAnchor),
+            // Progress bar — below title
+            progressBar.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            progressBar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            progressBar.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
+            progressBar.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -8),
 
-            // Progress bar — full width below the icon/text row
-            progressBar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalPadding),
-            progressBar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalPadding),
-            progressBar.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: rowProgressGap),
-
-            // Separator — bottom edge, 1pt
-            separator.leadingAnchor.constraint(equalTo: leadingAnchor),
-            separator.trailingAnchor.constraint(equalTo: trailingAnchor),
-            separator.topAnchor.constraint(equalTo: progressBar.bottomAnchor, constant: topPadding),
-            separator.heightAnchor.constraint(equalToConstant: 1),
-            separator.bottomAnchor.constraint(equalTo: bottomAnchor),
+            // Icon — spans from title top to progress bar bottom, 1:1 aspect ratio
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            iconView.topAnchor.constraint(equalTo: titleLabel.topAnchor),
+            iconView.bottomAnchor.constraint(equalTo: progressBar.bottomAnchor),
+            iconView.widthAnchor.constraint(equalTo: iconView.heightAnchor),
         ])
-
-        separator.layer?.backgroundColor = NSColor.Semantic.borderSubtle.cgColor
     }
 
-    // MARK: - Configure
-
     func configure(summary: AppSummary, totalDuration: TimeInterval) {
-        // Icon
         let icon = summary.icon ?? NSImage(systemSymbolName: "app", accessibilityDescription: "App")!
         iconView.configure(with: EmpImage.ViewModel(
             common: CommonViewModel(corners: .init(radius: 8)),
@@ -98,40 +66,44 @@ final class TimelineCellView: NSTableCellView {
             contentMode: .aspectFit
         ))
 
-        // Title
+        // Deactivate EmpImage's internal fixed size constraints so external layout drives sizing
+        for subview in iconView.subviews {
+            for constraint in subview.constraints where constraint.secondAttribute == .notAnAttribute {
+                if constraint.firstAttribute == .width || constraint.firstAttribute == .height {
+                    constraint.isActive = false
+                }
+            }
+        }
+
         titleLabel.configure(with: EmpText.ViewModel(
             content: .plain(.init(
                 text: summary.appName,
-                font: .systemFont(ofSize: 14, weight: .medium),
+                font: .systemFont(ofSize: 13, weight: .medium),
                 color: NSColor.Semantic.textPrimary
             )),
             numberOfLines: 1
         ))
 
-        // Duration
         let durationText = Self.formatDuration(summary.totalDuration)
         durationLabel.configure(with: EmpText.ViewModel(
             content: .plain(.init(
                 text: durationText,
-                font: .systemFont(ofSize: 14, weight: .regular),
+                font: .systemFont(ofSize: 13),
                 color: NSColor.Semantic.textSecondary
             )),
             numberOfLines: 1,
             alignment: .right
         ))
 
-        // Progress
         let progress: CGFloat = totalDuration > 0
             ? CGFloat(summary.totalDuration / totalDuration)
             : 0
         progressBar.configure(with: EmpProgressBar.ViewModel(
             progress: progress,
             fillColor: NSColor.Semantic.actionPrimary,
-            barHeight: 4
+            barHeight: 3
         ))
     }
-
-    // MARK: - Duration Formatting
 
     private static func formatDuration(_ interval: TimeInterval) -> String {
         let total = Int(interval)
