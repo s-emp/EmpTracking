@@ -12,14 +12,16 @@ struct GanttEntry: Identifiable {
 struct SessionGanttView: View {
     let entries: [GanttEntry]
 
-    /// Apps sorted by total duration (most active first), max 15.
+    /// Height per app row in the chart (ensures bars are at least ~8pt tall).
+    private static let rowHeight: CGFloat = 28
+
+    /// Apps sorted by total duration (most active first).
     private var sortedAppNames: [String] {
         var totals: [String: TimeInterval] = [:]
         for entry in entries {
             totals[entry.appName, default: 0] += entry.endTime.timeIntervalSince(entry.startTime)
         }
         return totals.sorted { $0.value > $1.value }
-            .prefix(15)
             .map { $0.key }
     }
 
@@ -44,29 +46,36 @@ struct SessionGanttView: View {
     }
 
     var body: some View {
-        let visibleApps = Set(sortedAppNames)
+        let names = sortedAppNames
+        let visibleApps = Set(names)
         let visibleEntries = entries.filter { visibleApps.contains($0.appName) }
+        let chartHeight = CGFloat(names.count) * Self.rowHeight
 
-        Chart(visibleEntries) { entry in
-            RectangleMark(
-                xStart: .value("Start", entry.startTime),
-                xEnd: .value("End", entry.endTime),
-                y: .value("App", entry.appName)
-            )
-            .foregroundStyle(GanttColorPalette.colors[entry.colorIndex % GanttColorPalette.colors.count])
-            .clipShape(RoundedRectangle(cornerRadius: 3))
-        }
-        .chartXScale(domain: timeDomain)
-        .chartYScale(domain: sortedAppNames)
-        .chartXAxis {
-            AxisMarks(values: .stride(by: .hour, count: 1)) { _ in
-                AxisGridLine()
-                AxisValueLabel(format: .dateTime.hour(.defaultDigits(amPM: .omitted)), centered: false)
+        ScrollView(.vertical) {
+            Chart(visibleEntries) { entry in
+                RectangleMark(
+                    xStart: .value("Start", entry.startTime),
+                    xEnd: .value("End", entry.endTime),
+                    y: .value("App", entry.appName)
+                )
+                .foregroundStyle(GanttColorPalette.colors[entry.colorIndex % GanttColorPalette.colors.count])
+                .clipShape(RoundedRectangle(cornerRadius: 3))
             }
-        }
-        .chartYAxis {
-            AxisMarks { _ in
-                AxisValueLabel()
+            .chartXScale(domain: timeDomain)
+            .chartYScale(domain: names)
+            .chartXAxis {
+                AxisMarks(values: .stride(by: .hour, count: 1)) { _ in
+                    AxisGridLine()
+                    AxisValueLabel(format: .dateTime.hour(.defaultDigits(amPM: .omitted)), centered: false)
+                }
+            }
+            .chartYAxis {
+                AxisMarks { _ in
+                    AxisValueLabel()
+                }
+            }
+            .chartPlotStyle { plotArea in
+                plotArea.frame(height: max(chartHeight, 100))
             }
         }
     }

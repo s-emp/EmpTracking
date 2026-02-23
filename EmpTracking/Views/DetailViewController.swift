@@ -496,11 +496,8 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
 
         ganttEntries = entries
 
-        // Calculate dynamic height: 28px per app row + 40px for axes, min 160, max 400
-        let uniqueApps = Set(entries.map(\.appName)).count
-        let appCount = min(uniqueApps, 15)
-        let dynamicHeight = max(160.0, min(400.0, CGFloat(appCount) * 28.0 + 40.0))
-        ganttHeightConstraint?.constant = dynamicHeight
+        // Fixed max height — vertical scroll inside the chart handles overflow
+        ganttHeightConstraint?.constant = 350
 
         if let hostingView = ganttHostingView as? NSHostingView<SessionGanttView> {
             hostingView.rootView = SessionGanttView(entries: entries)
