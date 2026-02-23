@@ -53,6 +53,10 @@ final class SyncManager {
         timer = nil
     }
 
+    func syncNow() {
+        performSync()
+    }
+
     private func updateStatus(_ status: SyncStatus) {
         syncStatus = status
         DispatchQueue.main.async { [weak self] in

@@ -10,6 +10,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var syncManager: SyncManager?
     private var timelineVC: TimelineViewController!
     private var detailWindow: NSWindow?
+    private var statusMenu: NSMenu!
+    private var syncMenuItem: NSMenuItem!
 
     static func main() {
         let app = NSApplication.shared
@@ -21,6 +23,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         setupDatabase()
         setupMenubar()
+        setupStatusMenu()
         setupTracker()
         setupSync()
         registerAutoLaunch()
@@ -53,7 +56,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = statusItem.button {
             button.image = NSImage(systemSymbolName: "clock", accessibilityDescription: "EmpTracking")
             button.target = self
-            button.action = #selector(togglePopover)
+            button.action = #selector(statusItemClicked)
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
         timelineVC = TimelineViewController(db: db)
@@ -135,5 +139,58 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         window.makeKeyAndOrderFront(nil)
         NSApp.activate()
+    }
+
+    // MARK: - Status Menu (Right-Click)
+
+    private func setupStatusMenu() {
+        statusMenu = NSMenu()
+
+        let detailItem = NSMenuItem(title: "Подробно", action: #selector(showDetailFromMenu), keyEquivalent: "")
+        detailItem.target = self
+        statusMenu.addItem(detailItem)
+
+        syncMenuItem = NSMenuItem(title: "Синхронизация — никогда", action: #selector(syncFromMenu), keyEquivalent: "")
+        syncMenuItem.target = self
+        statusMenu.addItem(syncMenuItem)
+
+        statusMenu.addItem(.separator())
+
+        let quitItem = NSMenuItem(title: "Выйти", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+        statusMenu.addItem(quitItem)
+    }
+
+    @objc private func statusItemClicked() {
+        guard let event = NSApp.currentEvent else { return }
+        if event.type == .rightMouseUp {
+            updateSyncMenuTitle()
+            statusItem.menu = statusMenu
+            statusItem.button?.performClick(nil)
+            DispatchQueue.main.async { [weak self] in
+                self?.statusItem.menu = nil
+            }
+        } else {
+            togglePopover()
+        }
+    }
+
+    private func updateSyncMenuTitle() {
+        let lastPullTime = try? db.fetchSetting(key: "last_pull_time")
+        if let timeStr = lastPullTime, let timestamp = TimeInterval(timeStr) {
+            let date = Date(timeIntervalSince1970: timestamp)
+            let formatter = DateFormatter()
+            formatter.dateFormat = "HH:mm"
+            syncMenuItem.title = "Синхронизация — \(formatter.string(from: date))"
+        } else {
+            syncMenuItem.title = "Синхронизация — никогда"
+        }
+    }
+
+    @objc private func showDetailFromMenu() {
+        showDetailWindow()
+    }
+
+    @objc private func syncFromMenu() {
+        syncManager?.syncNow()
     }
 }
