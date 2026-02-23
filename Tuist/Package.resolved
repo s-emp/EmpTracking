@@ -1,5 +1,5 @@
 {
-  "originHash" : "bf05c61fa9a017b04e5d083c093d3a9fd12a894d3a53d5764bab2f201d141adf",
+  "originHash" : "ff8d003ae62e50dd47530b2df5b7c25ab89b434089bf43f91bd5e2a0203108c5",
   "pins" : [
     {
       "identity" : "empdesignsystem",
@@ -42,8 +42,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/pointfreeco/xctest-dynamic-overlay",
       "state" : {
-        "revision" : "34e463e98ab8541c604af706c99bed7160f5ec70",
-        "version" : "1.8.1"
+        "revision" : "dfd70507def84cb5fb821278448a262c6ff2bbad",
+        "version" : "1.9.0"
       }
     }
   ],
