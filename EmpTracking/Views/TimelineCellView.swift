@@ -131,12 +131,6 @@ final class TimelineCellView: NSTableCellView {
         ))
     }
 
-    /// Backward-compatible overload — will be removed in Task 2 when TimelineViewController is updated.
-    @available(*, deprecated, message: "Use configure(summary:totalDuration:) instead")
-    func configure(summary: AppSummary) {
-        configure(summary: summary, totalDuration: 0)
-    }
-
     // MARK: - Duration Formatting
 
     private static func formatDuration(_ interval: TimeInterval) -> String {

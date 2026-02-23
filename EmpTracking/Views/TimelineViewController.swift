@@ -3,18 +3,24 @@ import Cocoa
 final class TimelineViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     private let db: DatabaseManager
     private var appSummaries: [AppSummary] = []
-    private var tagSummaries: [TagSummary] = []
+    private var totalDuration: TimeInterval = 0
     var onDetail: (() -> Void)?
 
-    private enum Mode: Int { case apps = 0, tags = 1 }
-    private var mode: Mode = .apps
+    // MARK: - UI Elements
 
-    private let segmentedControl = NSSegmentedControl()
+    private let dateLabel = EmpText()
+    private let totalLabel = EmpText()
+    private let headerSeparator: NSView = {
+        let view = NSView()
+        view.wantsLayer = true
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }()
     private let scrollView = NSScrollView()
     private let tableView = NSTableView()
-    private let headerLabel = NSTextField(labelWithString: "")
-    private let totalLabel = NSTextField(labelWithString: "")
-    private let syncButton = NSButton(title: "Синхронизация", target: nil, action: nil)
+    private let showMoreButton = EmpButton()
+
+    // MARK: - Init
 
     init(db: DatabaseManager) {
         self.db = db
@@ -25,36 +31,40 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
         fatalError("init(coder:) has not been implemented")
     }
 
+    // MARK: - Load View
+
     override func loadView() {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 500))
         self.view = container
 
-        headerLabel.translatesAutoresizingMaskIntoConstraints = false
-        headerLabel.font = .systemFont(ofSize: 15, weight: .semibold)
-        container.addSubview(headerLabel)
+        let horizontalPadding = EmpSpacing.m.rawValue   // 16
+        let topPadding = EmpSpacing.m.rawValue           // 16
+        let sectionGap = EmpSpacing.s.rawValue           // 12
+        let smallGap = EmpSpacing.xs.rawValue             // 8
 
+        // Date label (left)
+        dateLabel.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(dateLabel)
+
+        // Total time label (right)
         totalLabel.translatesAutoresizingMaskIntoConstraints = false
-        totalLabel.font = .systemFont(ofSize: 12)
-        totalLabel.textColor = .secondaryLabelColor
+        totalLabel.setContentHuggingPriority(.required, for: .horizontal)
+        totalLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         container.addSubview(totalLabel)
 
-        segmentedControl.translatesAutoresizingMaskIntoConstraints = false
-        segmentedControl.segmentCount = 2
-        segmentedControl.setLabel("Приложения", forSegment: 0)
-        segmentedControl.setLabel("Теги", forSegment: 1)
-        segmentedControl.selectedSegment = 0
-        segmentedControl.target = self
-        segmentedControl.action = #selector(segmentChanged(_:))
-        segmentedControl.segmentStyle = .rounded
-        container.addSubview(segmentedControl)
+        // Header separator (1pt line)
+        container.addSubview(headerSeparator)
+        headerSeparator.layer?.backgroundColor = NSColor.Semantic.borderSubtle.cgColor
 
+        // Table view
         let column = NSTableColumn(identifier: .init("activity"))
         column.title = ""
         tableView.addTableColumn(column)
         tableView.headerView = nil
         tableView.dataSource = self
         tableView.delegate = self
-        tableView.rowHeight = 48
+        tableView.rowHeight = 72
+        tableView.selectionHighlightStyle = .none
         tableView.style = .plain
 
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -64,153 +74,128 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
         tableView.backgroundColor = .clear
         container.addSubview(scrollView)
 
-        let detailButton = NSButton(title: "Подробнее", target: self, action: #selector(detailTapped))
-        detailButton.translatesAutoresizingMaskIntoConstraints = false
-        detailButton.bezelStyle = .inline
-        detailButton.font = .systemFont(ofSize: 11)
-        container.addSubview(detailButton)
-
-        syncButton.translatesAutoresizingMaskIntoConstraints = false
-        syncButton.bezelStyle = .inline
-        syncButton.font = .systemFont(ofSize: 11)
-        syncButton.isEnabled = false
-        container.addSubview(syncButton)
-
-        let quitButton = NSButton(title: "Quit", target: NSApp, action: #selector(NSApplication.terminate(_:)))
-        quitButton.translatesAutoresizingMaskIntoConstraints = false
-        quitButton.bezelStyle = .inline
-        quitButton.font = .systemFont(ofSize: 11)
-        container.addSubview(quitButton)
+        // "Show more..." button (ghost, small, centered)
+        showMoreButton.translatesAutoresizingMaskIntoConstraints = false
+        showMoreButton.configure(with: EmpButton.Preset.ghost(
+            .primary,
+            content: .init(center: .text("Show more...")),
+            size: .small
+        ))
+        showMoreButton.action = { [weak self] in
+            self?.onDetail?()
+        }
+        container.addSubview(showMoreButton)
 
         NSLayoutConstraint.activate([
-            headerLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
-            headerLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            // Date label — top-left
+            dateLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: topPadding),
+            dateLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: horizontalPadding),
 
-            totalLabel.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
-            totalLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            // Total label — top-right, vertically centered with date
+            totalLabel.centerYAnchor.constraint(equalTo: dateLabel.centerYAnchor),
+            totalLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -horizontalPadding),
+            totalLabel.leadingAnchor.constraint(greaterThanOrEqualTo: dateLabel.trailingAnchor, constant: smallGap),
 
-            segmentedControl.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 8),
-            segmentedControl.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            segmentedControl.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            // Header separator
+            headerSeparator.topAnchor.constraint(equalTo: dateLabel.bottomAnchor, constant: sectionGap),
+            headerSeparator.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            headerSeparator.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            headerSeparator.heightAnchor.constraint(equalToConstant: 1),
 
-            scrollView.topAnchor.constraint(equalTo: segmentedControl.bottomAnchor, constant: 8),
+            // Scroll view — below separator, above button
+            scrollView.topAnchor.constraint(equalTo: headerSeparator.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: quitButton.topAnchor, constant: -8),
+            scrollView.bottomAnchor.constraint(equalTo: showMoreButton.topAnchor, constant: -smallGap),
 
-            detailButton.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            detailButton.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
-
-            syncButton.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            syncButton.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
-
-            quitButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-            quitButton.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
+            // "Show more..." button — centered at bottom
+            showMoreButton.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            showMoreButton.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -sectionGap),
         ])
     }
+
+    // MARK: - Lifecycle
 
     override func viewWillAppear() {
         super.viewWillAppear()
         reload()
     }
 
-    @objc private func segmentChanged(_ sender: NSSegmentedControl) {
-        mode = Mode(rawValue: sender.selectedSegment) ?? .apps
-        reload()
-    }
-
-    @objc private func detailTapped() {
-        onDetail?()
-    }
-
-    func updateSyncStatus(_ status: SyncManager.SyncStatus) {
-        switch status {
-        case .synced:
-            syncButton.title = "Синхронизация \u{2713}"
-            syncButton.contentTintColor = .systemGreen
-        case .syncing:
-            syncButton.title = "Синхронизация..."
-            syncButton.contentTintColor = .secondaryLabelColor
-        case .pending(let count):
-            syncButton.title = "Не синхр: \(count)"
-            syncButton.contentTintColor = .systemOrange
-        case .error:
-            syncButton.title = "Синхр. ошибка"
-            syncButton.contentTintColor = .systemRed
-        case .idle:
-            syncButton.title = "Синхронизация"
-            syncButton.contentTintColor = .secondaryLabelColor
-        }
-    }
+    // MARK: - Reload
 
     func reload() {
+        // Date header — English, "MMMM d" format
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ru_RU")
-        formatter.dateFormat = "d MMMM yyyy"
-        headerLabel.stringValue = formatter.string(from: Date())
+        formatter.locale = Locale(identifier: "en_US")
+        formatter.dateFormat = "MMMM d"
 
+        dateLabel.configure(with: EmpText.ViewModel(
+            content: .plain(.init(
+                text: formatter.string(from: Date()),
+                font: .systemFont(ofSize: 14),
+                color: NSColor.Semantic.textSecondary
+            )),
+            numberOfLines: 1
+        ))
+
+        // Fetch app summaries
         let since = Calendar.current.startOfDay(for: Date())
 
         do {
-            switch mode {
-            case .apps:
-                appSummaries = try db.fetchAppSummaries(since: since)
-                let total = appSummaries.reduce(0.0) { $0 + $1.totalDuration }
-                totalLabel.stringValue = formatDuration(total)
-
-            case .tags:
-                tagSummaries = try db.fetchTagSummaries(from: since, to: Date())
-                let total = tagSummaries.reduce(0.0) { $0 + $1.totalDuration }
-                totalLabel.stringValue = formatDuration(total)
-            }
+            appSummaries = try db.fetchAppSummaries(since: since)
+            totalDuration = appSummaries.reduce(0.0) { $0 + $1.totalDuration }
         } catch {
             print("Error fetching summaries: \(error)")
+            appSummaries = []
+            totalDuration = 0
         }
+
+        // Total time header
+        totalLabel.configure(with: EmpText.ViewModel(
+            content: .plain(.init(
+                text: formatDuration(totalDuration),
+                font: .systemFont(ofSize: 16, weight: .bold),
+                color: NSColor.Semantic.textPrimary
+            )),
+            numberOfLines: 1,
+            alignment: .right
+        ))
 
         tableView.reloadData()
     }
 
+    // MARK: - Helpers
+
     private func formatDuration(_ seconds: TimeInterval) -> String {
         let hours = Int(seconds) / 3600
         let minutes = (Int(seconds) % 3600) / 60
-        return "\(hours)ч \(minutes)мин"
+        if hours > 0 {
+            return "\(hours)h \(minutes)min"
+        } else {
+            return "\(minutes)min"
+        }
     }
 
     // MARK: - NSTableViewDataSource
 
     nonisolated func numberOfRows(in tableView: NSTableView) -> Int {
         MainActor.assumeIsolated {
-            switch mode {
-            case .apps: return appSummaries.count
-            case .tags: return tagSummaries.count
-            }
+            return appSummaries.count
         }
     }
 
     // MARK: - NSTableViewDelegate
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        switch mode {
-        case .apps:
-            let id = NSUserInterfaceItemIdentifier("TimelineCell")
-            let cell = (tableView.makeView(withIdentifier: id, owner: nil) as? TimelineCellView)
-                ?? TimelineCellView()
-            cell.identifier = id
-            cell.configure(summary: appSummaries[row])
-            return cell
-
-        case .tags:
-            let id = NSUserInterfaceItemIdentifier("TagCell")
-            let cell = (tableView.makeView(withIdentifier: id, owner: nil) as? TagCellView)
-                ?? TagCellView()
-            cell.identifier = id
-            cell.configure(summary: tagSummaries[row])
-            return cell
-        }
+        let id = NSUserInterfaceItemIdentifier("TimelineCell")
+        let cell = (tableView.makeView(withIdentifier: id, owner: nil) as? TimelineCellView)
+            ?? TimelineCellView()
+        cell.identifier = id
+        cell.configure(summary: appSummaries[row], totalDuration: totalDuration)
+        return cell
     }
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
-        guard mode == .apps else { return false }
         let summary = appSummaries[row]
         showTagMenu(forAppId: summary.appId, at: row)
         return false
@@ -234,7 +219,7 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
         let currentTagId = appInfo?.defaultTagId
 
         // "No tag" item
-        let noTagItem = NSMenuItem(title: "Без тега", action: #selector(tagMenuItemClicked(_:)), keyEquivalent: "")
+        let noTagItem = NSMenuItem(title: "No tag", action: #selector(tagMenuItemClicked(_:)), keyEquivalent: "")
         noTagItem.target = self
         noTagItem.representedObject = ["appId": appId, "tagId": NSNull()] as NSDictionary
         if currentTagId == nil { noTagItem.state = .on }
@@ -264,7 +249,7 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
 
         menu.addItem(.separator())
 
-        let createItem = NSMenuItem(title: "Создать тег...", action: #selector(createTagClicked(_:)), keyEquivalent: "")
+        let createItem = NSMenuItem(title: "Create tag...", action: #selector(createTagClicked(_:)), keyEquivalent: "")
         createItem.target = self
         menu.addItem(createItem)
 
@@ -286,17 +271,17 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
 
     @objc private func createTagClicked(_ sender: NSMenuItem) {
         let alert = NSAlert()
-        alert.messageText = "Создать тег"
-        alert.addButton(withTitle: "Создать")
-        alert.addButton(withTitle: "Отмена")
+        alert.messageText = "Create tag"
+        alert.addButton(withTitle: "Create")
+        alert.addButton(withTitle: "Cancel")
 
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 100))
 
         let nameField = NSTextField(frame: NSRect(x: 0, y: 70, width: 300, height: 24))
-        nameField.placeholderString = "Название тега"
+        nameField.placeholderString = "Tag name"
         container.addSubview(nameField)
 
-        let lightLabel = NSTextField(labelWithString: "Светлая:")
+        let lightLabel = NSTextField(labelWithString: "Light:")
         lightLabel.frame = NSRect(x: 0, y: 35, width: 60, height: 20)
         container.addSubview(lightLabel)
 
@@ -304,7 +289,7 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
         lightColorWell.color = .systemGreen
         container.addSubview(lightColorWell)
 
-        let darkLabel = NSTextField(labelWithString: "Тёмная:")
+        let darkLabel = NSTextField(labelWithString: "Dark:")
         darkLabel.frame = NSRect(x: 150, y: 35, width: 60, height: 20)
         container.addSubview(darkLabel)
 
@@ -325,8 +310,8 @@ final class TimelineViewController: NSViewController, NSTableViewDataSource, NST
             reload()
         } catch {
             let errorAlert = NSAlert()
-            errorAlert.messageText = "Ошибка"
-            errorAlert.informativeText = "Тег с таким именем уже существует."
+            errorAlert.messageText = "Error"
+            errorAlert.informativeText = "A tag with this name already exists."
             errorAlert.runModal()
         }
     }

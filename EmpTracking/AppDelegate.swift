@@ -86,8 +86,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.timelineVC.reload()
                 }
             }
-            syncManager?.onStatusChanged = { [weak self] (status: SyncManager.SyncStatus) in
-                self?.timelineVC.updateSyncStatus(status)
+            syncManager?.onStatusChanged = { (_: SyncManager.SyncStatus) in
+                // Status display removed from popover in redesign
             }
             syncManager?.start()
         } catch {
@@ -108,9 +108,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             popover.performClose(nil)
         } else if let button = statusItem.button {
             timelineVC.reload()
-            if let status = syncManager?.syncStatus {
-                timelineVC.updateSyncStatus(status)
-            }
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
     }
