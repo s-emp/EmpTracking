@@ -8,6 +8,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var db: DatabaseManager!
     private var tracker: ActivityTracker!
     private var syncManager: SyncManager?
+    private var lastSyncSuccess: Bool?
     private var timelineVC: TimelineViewController!
     private var detailWindow: NSWindow?
     private var statusMenu: NSMenu!
@@ -90,8 +91,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.timelineVC.reload()
                 }
             }
-            syncManager?.onStatusChanged = { (_: SyncManager.SyncStatus) in
-                // Status display removed from popover in redesign
+            syncManager?.onStatusChanged = { [weak self] status in
+                switch status {
+                case .synced:
+                    self?.lastSyncSuccess = true
+                case .error:
+                    self?.lastSyncSuccess = false
+                case .pending(let count) where count > 0:
+                    self?.lastSyncSuccess = false
+                default:
+                    break
+                }
             }
             syncManager?.start()
         } catch {
@@ -175,14 +185,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateSyncMenuTitle() {
+        let prefix: String
+        switch lastSyncSuccess {
+        case .some(true): prefix = "✅ "
+        case .some(false): prefix = "❌ "
+        case .none: prefix = ""
+        }
+
         let lastPullTime = try? db.fetchSetting(key: "last_pull_time")
         if let timeStr = lastPullTime, let timestamp = TimeInterval(timeStr) {
             let date = Date(timeIntervalSince1970: timestamp)
             let formatter = DateFormatter()
             formatter.dateFormat = "HH:mm"
-            syncMenuItem.title = "Синхронизация — \(formatter.string(from: date))"
+            syncMenuItem.title = "\(prefix)Синхронизация — \(formatter.string(from: date))"
         } else {
-            syncMenuItem.title = "Синхронизация — никогда"
+            syncMenuItem.title = "\(prefix)Синхронизация — никогда"
         }
     }
 
