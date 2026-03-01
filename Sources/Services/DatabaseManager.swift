@@ -263,13 +263,17 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
     }
 
     func fetchAppSummaries(since: Date) throws -> [AppSummary] {
+        return try fetchAppSummaries(from: since, to: .distantFuture)
+    }
+
+    func fetchAppSummaries(from: Date, to: Date) throws -> [AppSummary] {
         let sql = """
             SELECT a.id, a.app_name, a.bundle_id, ai.icon,
                    SUM(l.end_time - l.start_time) as total_duration
             FROM activity_logs l
             JOIN apps a ON a.id = l.app_id
             LEFT JOIN app_icons ai ON ai.app_id = a.id
-            WHERE l.start_time >= ? AND l.is_idle = 0
+            WHERE l.start_time >= ? AND l.start_time < ? AND l.is_idle = 0
             GROUP BY l.app_id
             ORDER BY total_duration DESC
         """
@@ -280,7 +284,8 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
             throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
         }
 
-        sqlite3_bind_double(stmt, 1, since.timeIntervalSince1970)
+        sqlite3_bind_double(stmt, 1, from.timeIntervalSince1970)
+        sqlite3_bind_double(stmt, 2, to.timeIntervalSince1970)
 
         var summaries: [AppSummary] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -303,6 +308,45 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
         }
 
         return summaries
+    }
+
+    func fetchLongestSession(from: Date, to: Date) throws -> TimeInterval {
+        let sql = """
+            SELECT MAX(l.end_time - l.start_time)
+            FROM activity_logs l
+            WHERE l.start_time >= ? AND l.start_time < ? AND l.is_idle = 0
+        """
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        sqlite3_bind_double(stmt, 1, from.timeIntervalSince1970)
+        sqlite3_bind_double(stmt, 2, to.timeIntervalSince1970)
+
+        if sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_type(stmt, 0) != SQLITE_NULL {
+            return sqlite3_column_double(stmt, 0)
+        }
+
+        return 0
+    }
+
+    func fetchDistinctDeviceNames() throws -> [String] {
+        let sql = "SELECT DISTINCT device_name FROM remote_logs ORDER BY device_name"
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        var names: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            names.append(String(cString: sqlite3_column_text(stmt, 0)))
+        }
+        return names
     }
 
     func fetchAppInfo(appId: Int64) throws -> AppInfo? {
@@ -452,6 +496,32 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
             sqlite3_bind_null(stmt, 1)
         }
         sqlite3_bind_int64(stmt, 2, logId)
+
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            throw DBError.updateFailed(String(cString: sqlite3_errmsg(db)))
+        }
+    }
+
+    func setTagForLogs(logIds: [Int64], tagId: Int64?) throws {
+        guard !logIds.isEmpty else { return }
+        let placeholders = logIds.map { _ in "?" }.joined(separator: ",")
+        let sql = "UPDATE activity_logs SET tag_id = \(tagId == nil ? "NULL" : "?") WHERE id IN (\(placeholders))"
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        var bindIndex: Int32 = 1
+        if let tagId = tagId {
+            sqlite3_bind_int64(stmt, bindIndex, tagId)
+            bindIndex += 1
+        }
+        for id in logIds {
+            sqlite3_bind_int64(stmt, bindIndex, id)
+            bindIndex += 1
+        }
 
         if sqlite3_step(stmt) != SQLITE_DONE {
             throw DBError.updateFailed(String(cString: sqlite3_errmsg(db)))

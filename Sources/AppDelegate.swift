@@ -130,19 +130,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover.performClose(nil)
 
         if let window = detailWindow {
-            (window.contentViewController as? DetailViewController)?.reload()
+            (window.contentViewController as? StatsViewController)?.reload()
             window.makeKeyAndOrderFront(nil)
             NSApp.activate()
             return
         }
 
         let deviceId = (try? db.getOrCreateDeviceId()) ?? ""
-        let detailVC = DetailViewController(db: db, deviceId: deviceId)
-        let window = NSWindow(contentViewController: detailVC)
-        window.title = "Подробнее"
-        window.setContentSize(NSSize(width: 500, height: 600))
+        let statsVC = StatsViewController(db: db, deviceId: deviceId)
+        let window = NSWindow(contentViewController: statsVC)
+        window.title = "Statistics"
+        window.setContentSize(NSSize(width: 1280, height: 820))
         window.styleMask = [.titled, .closable, .resizable, .miniaturizable]
-        window.minSize = NSSize(width: 400, height: 300)
+        window.minSize = NSSize(width: 900, height: 600)
         window.center()
         window.isReleasedWhenClosed = false
         self.detailWindow = window

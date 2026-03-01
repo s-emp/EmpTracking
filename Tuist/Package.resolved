@@ -6,8 +6,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/s-emp/EmpDesignSystem",
       "state" : {
-        "revision" : "17dbfd1a14815ec388971f4f7613dd59f588bf77",
-        "version" : "0.1.0"
+        "revision" : "d65ca67d85ac549c3760d947127362a9012b9cdf",
+        "version" : "0.2.0"
       }
     },
     {
