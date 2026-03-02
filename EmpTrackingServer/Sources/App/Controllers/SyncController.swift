@@ -53,7 +53,12 @@ struct SyncController: RouteCollection {
                 .filter(\.$deviceId == input.device_id)
                 .filter(\.$clientLogId == logPayload.client_log_id)
                 .first()
-            if duplicate != nil { continue }
+            if let duplicate {
+                duplicate.endTime = logPayload.end_time
+                try await duplicate.save(on: req.db)
+                syncedCount += 1
+                continue
+            }
 
             // Resolve bundle_id to app_id
             guard let app = try await TrackedApp.query(on: req.db)

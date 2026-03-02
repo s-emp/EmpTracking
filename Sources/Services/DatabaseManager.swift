@@ -189,7 +189,7 @@ nonisolated final class DatabaseManager: @unchecked Sendable {
     }
 
     func updateEndTime(logId: Int64, endTime: Date) throws {
-        let sql = "UPDATE activity_logs SET end_time = ? WHERE id = ?"
+        let sql = "UPDATE activity_logs SET end_time = ?, synced = 0 WHERE id = ?"
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
 
