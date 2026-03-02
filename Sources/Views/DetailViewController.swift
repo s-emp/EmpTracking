@@ -474,7 +474,9 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
                 appName: appName,
                 startTime: log.startTime,
                 endTime: log.endTime,
-                colorIndex: colorIndex
+                colorIndex: colorIndex,
+                logIds: [log.id],
+                tagId: log.tagId
             ))
         }
 
@@ -484,7 +486,9 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
                 appName: log.appName,
                 startTime: log.startTime,
                 endTime: log.endTime,
-                colorIndex: colorIndex
+                colorIndex: colorIndex,
+                logIds: [],
+                tagId: nil
             ))
         }
 
@@ -528,7 +532,9 @@ final class DetailViewController: NSViewController, NSTableViewDataSource, NSTab
                         appName: current.appName,
                         startTime: current.startTime,
                         endTime: max(current.endTime, next.endTime),
-                        colorIndex: current.colorIndex
+                        colorIndex: current.colorIndex,
+                        logIds: current.logIds + next.logIds,
+                        tagId: current.tagId ?? next.tagId
                     )
                 } else {
                     merged.append(current)

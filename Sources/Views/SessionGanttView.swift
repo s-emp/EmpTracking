@@ -165,8 +165,9 @@ struct SessionGanttView: View {
     private func dragGesture(proxy: ChartProxy, geometry: GeometryProxy) -> some Gesture {
         DragGesture(minimumDistance: 4)
             .onChanged { value in
-                guard let state = selectionState else { return }
-                let origin = geometry[proxy.plotFrame].origin
+                guard let state = selectionState,
+                      let plotFrame = proxy.plotFrame else { return }
+                let origin = geometry[plotFrame].origin
                 let startX = value.startLocation.x - origin.x
                 let currentX = value.location.x - origin.x
                 if let startDate = proxy.value(atX: startX) as Date?,
@@ -186,8 +187,9 @@ struct SessionGanttView: View {
     }
 
     private func handleTap(at location: CGPoint, proxy: ChartProxy, geometry: GeometryProxy) {
-        guard let state = selectionState else { return }
-        let origin = geometry[proxy.plotFrame].origin
+        guard let state = selectionState,
+              let plotFrame = proxy.plotFrame else { return }
+        let origin = geometry[plotFrame].origin
         let x = location.x - origin.x
         guard let date = proxy.value(atX: x) as Date? else { return }
 
