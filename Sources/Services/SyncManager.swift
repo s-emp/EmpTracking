@@ -3,6 +3,7 @@ import Foundation
 final class SyncManager {
     private let db: DatabaseManager
     private let serverBaseUrl: String
+    private let authToken: String
     private let deviceId: String
     private let deviceName: String
     private var timer: Timer?
@@ -29,7 +30,8 @@ final class SyncManager {
     init(db: DatabaseManager) throws {
         self.db = db
         self.serverBaseUrl = UserDefaults.standard.string(forKey: "syncServerUrl")
-            ?? "http://macmini.local:8080"
+            ?? "http://macmini.local:8600"
+        self.authToken = UserDefaults.standard.string(forKey: "syncAuthToken") ?? ""
         self.deviceId = try db.getOrCreateDeviceId()
         self.deviceName = Host.current().localizedName ?? "Unknown Mac"
 
@@ -88,6 +90,14 @@ final class SyncManager {
         }
     }
 
+    private func authorizedRequest(url: URL) -> URLRequest {
+        var request = URLRequest(url: url)
+        if !authToken.isEmpty {
+            request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+        }
+        return request
+    }
+
     private func isServerReachable() async throws -> Bool {
         var request = URLRequest(url: URL(string: "\(serverBaseUrl)/health")!)
         request.httpMethod = "HEAD"
@@ -102,8 +112,8 @@ final class SyncManager {
     }
 
     private func registerDevice() async throws {
-        let url = URL(string: "\(serverBaseUrl)/api/v1/devices")!
-        var request = URLRequest(url: url)
+        let url = URL(string: "\(serverBaseUrl)/api/v1/tracking/devices")!
+        var request = authorizedRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -167,8 +177,8 @@ final class SyncManager {
                 "logs": logs
             ]
 
-            let url = URL(string: "\(serverBaseUrl)/api/v1/sync/push")!
-            var request = URLRequest(url: url)
+            let url = URL(string: "\(serverBaseUrl)/api/v1/tracking/sync/push")!
+            var request = authorizedRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: payload)
@@ -190,8 +200,8 @@ final class SyncManager {
         let lastSync = (try db.fetchSetting(key: "last_pull_time"))
             .flatMap { Double($0) } ?? 0
 
-        let url = URL(string: "\(serverBaseUrl)/api/v1/sync/pull?device_id=\(deviceId)&since=\(lastSync)")!
-        var request = URLRequest(url: url)
+        let url = URL(string: "\(serverBaseUrl)/api/v1/tracking/sync/pull?device_id=\(deviceId)&since=\(lastSync)")!
+        var request = authorizedRequest(url: url)
         request.httpMethod = "GET"
 
         let (data, response) = try await session.data(for: request)
