@@ -100,7 +100,7 @@ final class SyncManager {
 
     private func isServerReachable() async throws -> Bool {
         var request = URLRequest(url: URL(string: "\(serverBaseUrl)/health")!)
-        request.httpMethod = "HEAD"
+        request.httpMethod = "GET"
         request.timeoutInterval = 3
 
         do {
